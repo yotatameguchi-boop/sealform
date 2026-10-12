@@ -1,6 +1,6 @@
 {
   "name": "sealform",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "Webフォームの入力をブラウザ内で耐量子ハイブリッド暗号化する（HPKE + X-Wing）",
   "main": "./dist/index.js",
   "directories": {
@@ -10,7 +10,9 @@
     "build": "node build.mjs && tsc -p tsconfig.json --emitDeclarationOnly",
     "test": "vitest run",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "example": "node examples/server.mjs"
+    "example": "node examples/server.mjs",
+    "release:build": "node build.mjs --release && tsc -p tsconfig.json --emitDeclarationOnly",
+    "build:wordpress": "node scripts/build-wordpress.mjs"
   },
   "keywords": [
     "encryption",
@@ -48,7 +50,11 @@
     "sealform": "./dist/cli.js"
   },
   "files": [
-    "dist"
+    "dist",
+    "!dist/wordpress",
+    "!dist/types/**/*.test.d.ts",
+    "server/php/sealform.php",
+    "server/python/sealform_check.py"
   ],
   "engines": {
     "node": ">=20"

@@ -160,4 +160,50 @@ describe("フォームへの組み込み", () => {
     await until(() => form.dataset.sealformState === "error");
     expect(form.querySelector("button")!.disabled).toBe(true);
   });
+
+  it("フォーム部品が自前で付けた submit 処理には、平文の submit イベントを渡さない", async () => {
+    const form = mount(FORM());
+    const seen: string[] = [];
+    // Contact Form 7 のように、submit を受けて FormData を AJAX 送信するスクリプトを想定
+    form.addEventListener("submit", (e) => {
+      e.preventDefault();
+      seen.push(String(new FormData(form).get("body")));
+    });
+    await until(() => form.dataset.sealformState === "ready");
+    form.requestSubmit();
+    await until(() => submitted.length === 1);
+    expect(seen).toEqual([]);
+  });
+
+  it("lang=en のページでは英語で表示する", async () => {
+    document.documentElement.lang = "en";
+    try {
+      const form = mount(FORM());
+      await until(() => form.dataset.sealformState === "ready");
+      expect(form.querySelector("[data-sealform-status]")!.textContent).toContain("encrypted on this device");
+      vi.stubGlobal("fetch", vi.fn(async () => new Response("", { status: 404 })));
+      const f2 = mount(FORM());
+      await until(() => f2.dataset.sealformState === "error");
+      expect(f2.querySelector("[data-sealform-status]")!.textContent).toContain("could not be loaded");
+    } finally {
+      document.documentElement.lang = "";
+    }
+  });
+
+  it("data-sealform-manual のフォームは自動初期化しない", async () => {
+    const { init } = await import("../src/browser.js");
+    document.body.innerHTML = FORM('method="post" data-sealform-manual');
+    init();
+    expect(document.forms[0]!.dataset.sealformAttached).toBeUndefined();
+  });
+
+  it("サーバーが差し戻した暗号文が入力欄に入っていたら、空にして知らせる（二重の暗号化を防ぐ）", async () => {
+    const { seal: sealText, loadPublicKey } = await import("../src/core.js");
+    const token = await sealText(await loadPublicKey(kp.publicDoc), "前回の入力", { form: "/contact", field: "name" });
+    const form = mount(FORM().replace('value="山田"', `value="${token}"`));
+    await until(() => form.dataset.sealformState === "ready");
+    expect(form.querySelector<HTMLInputElement>("input[name=name]")!.value).toBe("");
+    expect(form.querySelector<HTMLInputElement>("input[name=csrf]")!.value).toBe("tok123");
+    expect(form.querySelector("[data-sealform-status]")!.textContent).toContain("入力し直して");
+  });
 });

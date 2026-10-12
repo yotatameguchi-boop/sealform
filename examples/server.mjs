@@ -1,39 +1,16 @@
-// 動作確認用のサーバー（依存なし）。npm run build のあと: npm run example
+// 動作確認用のサーバー（Node のみ・依存なし）。npm run build のあと: npm run example
 // 受け取った暗号文を examples/.data/submissions.csv に貯めるだけで、サーバーは平文に一切触れない。
 import { createServer } from "node:http";
-import { readFile, appendFile, writeFile, mkdir, access, readdir } from "node:fs/promises";
+import { readFile, appendFile, writeFile } from "node:fs/promises";
 import { randomBytes } from "node:crypto";
 import { Readable } from "node:stream";
-import { execFileSync } from "node:child_process";
-import { dirname, join } from "node:path";
-import { fileURLToPath } from "node:url";
+import { join } from "node:path";
 import { isSealed, isSealedFile } from "../dist/index.js";
+import { prepareDemo, formHtml, dist, data, keySetPath } from "./shared/demo.mjs";
 
-const root = dirname(fileURLToPath(import.meta.url));
-const dist = join(root, "..", "dist");
-const data = join(root, ".data");
 const port = Number(process.env.PORT ?? 8787);
-
-await mkdir(data, { recursive: true });
-const keyPath = join(data, "sealform-key.json");
-const cli = (...args) =>
-  execFileSync(process.execPath, [join(dist, "cli.js"), ...args], {
-    env: { ...process.env, SEALFORM_PASSPHRASE: process.env.SEALFORM_PASSPHRASE ?? "demo-passphrase-123" },
-    stdio: ["ignore", "ignore", "inherit"],
-  });
-if (!(await access(keyPath).then(() => true, () => false))) {
-  // デモ用に、担当者2人分の鍵を作って鍵の束にする
-  // （本番では各担当者が手元で keygen し、公開鍵だけを集めて keys add する）
-  const keysDir = join(data, "keys");
-  cli("keygen", "--out", keysDir, "--label", "相談員A");
-  cli("keygen", "--out", keysDir, "--label", "相談員B");
-  const pubs = (await readdir(keysDir)).filter((f) => f.startsWith("sealform-key-")).map((f) => join(keysDir, f));
-  cli("keys", "add", keyPath, ...pubs);
-}
-const integrity = Object.values(JSON.parse(await readFile(join(dist, "hashes.json"), "utf8"))).at(-1);
-const keySet = JSON.parse(await readFile(keyPath, "utf8"));
-const fingerprints = (keySet.keys ?? [keySet]).map((k) => k.fingerprint).join(" ");
-await mkdir(join(data, "files"), { recursive: true });
+const demo = await prepareDemo();
+const keyPath = keySetPath;
 
 const CSP = "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'";
 const send = (res, status, type, body) => {
@@ -47,10 +24,7 @@ createServer(async (req, res) => {
   const url = new URL(req.url, `http://${req.headers.host}`);
   try {
     if (req.method === "GET" && url.pathname === "/") {
-      const html = (await readFile(join(root, "public", "index.html"), "utf8"))
-        .replace("__INTEGRITY__", integrity)
-        .replace("__FINGERPRINT__", fingerprints);
-      return send(res, 200, "text/html; charset=utf-8", html);
+      return send(res, 200, "text/html; charset=utf-8", await formHtml(demo, "sealform デモ・Node"));
     }
     if (req.method === "GET" && url.pathname === "/sealform.js") {
       return send(res, 200, "text/javascript; charset=utf-8", await readFile(join(dist, "sealform.js")));

@@ -20,6 +20,7 @@ import {
 } from "./core.js";
 import { MIN_PASSPHRASE_LENGTH, protectPrivateKey, unlockPrivateKey } from "./keyfile.js";
 import { checkSite, worstLevel } from "./check.js";
+import { describePrivateKey, fromRecoveryCode, recoverySheetHtml, toRecoveryCode } from "./recovery.js";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 
@@ -40,6 +41,11 @@ const HELP = `sealform ${__SEALFORM_VERSION__} — Web フォームをブラウ�
   sealform open --key <秘密鍵> [--key <秘密鍵>...] [--form <id>] [--field <name>] [--out <dir>] [--json] [<file>...]
       復号する。テキスト（CSV・ログ等）や標準入力からは sf1./sf2. で始まる暗号文を拾う。
       暗号化された添付ファイル（.sf）を渡すと、--out のフォルダに元の名前で書き出す
+
+  sealform recovery export <秘密鍵.json> [--out <file.html>]
+      秘密鍵を紙に印刷できる復旧コードにする（パスフレーズ無しで鍵を復元できるので厳重に保管）
+  sealform recovery import [--out <dir>]
+      復旧コードから秘密鍵ファイルを作り直す（新しいパスフレーズを決める）
 
   sealform check <url> [--fingerprint <SHA256:...>...] [--script-hash <sha384-...>] [--json]
       公開中のページを外から点検する（JS・公開鍵の差し替え、送信ボタンの保護など）
@@ -125,7 +131,8 @@ async function cmdKeygen(args: string[]) {
 秘密鍵: ${privPath}
   → サーバーには置かないでください。復号する担当者の手元だけで保管します
 指紋:   ${kp.publicDoc.fingerprint}
-有効期限: ${kp.publicDoc.expires}`);
+有効期限: ${kp.publicDoc.expires}
+  → 秘密鍵の紛失に備えて、sealform recovery export ${basename(privPath)} で紙の控えを作れます`);
 }
 
 async function readKeySet(path: string): Promise<KeySetDoc> {
@@ -267,6 +274,43 @@ async function cmdOpen(args: string[]) {
   if (failed) process.exitCode = 1;
 }
 
+async function cmdRecovery(args: string[]) {
+  const [sub, ...rest] = args;
+  if (sub === "export") {
+    const { values, positionals } = parseArgs({ args: rest, allowPositionals: true, options: { out: { type: "string" } } });
+    const keyPath = positionals[0];
+    if (!keyPath) throw new Error("秘密鍵ファイルを指定してください");
+    const file = JSON.parse(await readFile(keyPath, "utf8"));
+    const { kid, privateKey } = await unlockPrivateKey(file, await passphrase(`パスフレーズ（${basename(keyPath)}）: `, false));
+    const info = await describePrivateKey(privateKey);
+    const code = await toRecoveryCode(privateKey);
+    privateKey.fill(0);
+    const out = values.out ?? `sealform-recovery-${kid}.html`;
+    await writeFile(out, recoverySheetHtml({ code, kid, fingerprint: info.fingerprint, created: new Date().toISOString().slice(0, 10) }), { mode: 0o600, flag: "wx" });
+    console.log(`復旧コードの印刷用ページ: ${out}
+  → ブラウザで開いて印刷し、印刷したらこのファイルは削除してください（紙だけを残す）
+  → この紙はパスフレーズ無しで鍵になります。金庫など鍵のかかる場所に保管してください`);
+    return;
+  }
+  if (sub === "import") {
+    const { values } = parseArgs({ args: rest, options: { out: { type: "string", default: "." } } });
+    const code = process.stdin.isTTY ? await promptHidden("復旧コード: ") : (await readStdin()).trim();
+    const privateKey = await fromRecoveryCode(code);
+    const info = await describePrivateKey(privateKey);
+    console.error(`kid: ${info.kid}\n指紋: ${info.fingerprint}\n→ 印刷した紙の kid・指紋と同じか確かめてください`);
+    process.stderr.write(`新しいパスフレーズを決めてください（${MIN_PASSPHRASE_LENGTH} 文字以上）\n`);
+    const file = await protectPrivateKey(privateKey, info.publicKey, await passphrase("新しいパスフレーズ: ", true));
+    privateKey.fill(0);
+    const dir = resolve(values.out!);
+    await mkdir(dir, { recursive: true });
+    const dest = join(dir, `sealform-private-key-${info.kid}.json`);
+    await writeFile(dest, JSON.stringify(file, null, 2) + "\n", { mode: 0o600, flag: "wx" });
+    console.log(`秘密鍵ファイルを作り直しました: ${dest}`);
+    return;
+  }
+  throw new Error("使い方: sealform recovery export <秘密鍵.json> | sealform recovery import");
+}
+
 async function bundledScriptHashes(): Promise<string[]> {
   try {
     const h = JSON.parse(await readFile(join(HERE, "hashes.json"), "utf8")) as Record<string, string>;
@@ -313,6 +357,7 @@ async function main() {
     case "keygen": return cmdKeygen(rest);
     case "keys": return cmdKeys(rest);
     case "open": return cmdOpen(rest);
+    case "recovery": return cmdRecovery(rest);
     case "check": return cmdCheck(rest);
     case "sri": return cmdSri();
     case "fingerprint": {

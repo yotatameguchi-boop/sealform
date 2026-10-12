@@ -3,3 +3,5 @@ dist/
 *.private-key.json
 sealform-private-key*.json
 examples/.data/
+.venv/
+__pycache__/

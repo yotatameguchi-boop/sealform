@@ -1,5 +1,7 @@
 # sealform
 
+[English](README.en.md)
+
 **Web フォームの入力を、ブラウザの中で耐量子ハイブリッド暗号で暗号化してから送るライブラリ。**
 サーバー・DB・ログ・CDN には暗号文しか残らず、読めるのは秘密鍵を持つ担当者の手元だけです。
 
@@ -15,7 +17,7 @@
 </form>
 ```
 
-> 状態: v0.2（試作）。暗号の専門家による第三者レビューはまだ受けていません。本番の重要なデータに使う前に、下の「守れないもの」を読んでください。
+> 状態: v0.3（試作）。暗号の専門家による第三者レビューはまだ受けていません。本番の重要なデータに使う前に、下の「守れないもの」を読んでください。
 
 ## なぜ必要か
 
@@ -37,6 +39,8 @@ sealform を使うと、サーバーは**平文に一度も触れません**。�
 | **差し替え・使い回しの検出** | 宛先フォームと項目名を暗号文に結びつける。別フォーム宛ての暗号文を混ぜても復号時に分かる |
 | **外からの改ざん監視** | `sealform check` が、配っている JS が公式の配布物と同じか、公開鍵の指紋が変わっていないかを別の場所から確かめる |
 | **オフライン復号** | 担当者向けの復号ツールは HTML 1ファイル。CSP でネットワークを完全に遮断して動く |
+| **紙の復旧コード** | 秘密鍵を印刷できるコードにして金庫で保管できる。書き写しの誤りは検査値で検出する |
+| **主要なサーバーに対応** | Node・Express・Next.js・Flask・PHP の受け取り例と、WordPress（Contact Form 7）用プラグイン |
 
 ## 使い方
 
@@ -67,9 +71,14 @@ npx sealform keys add sealform-key.json sealform-key-<kid>.json ...   # 公開�
 
 `npx sealform sri` で `integrity` に書く値が出ます。
 
+React などで描画を自分で管理するときは、フォームに `data-sealform-manual` を付けて自動初期化を止め、描画のあとで `sealform.attach(form)` を呼びます（[Next.js の例](examples/nextjs/app/sealed-form.tsx)）。
+`<html lang="en">` のページでは表示が英語になります（`data-sealform-lang="en"` でも指定できます）。
+
 ### 3. サーバー側
 
 受け取った値をそのまま保存するだけです。平文が混ざって届いていないかは `isSealed()` / `isSealedFile()` で確かめられます。
+
+PHP（`server/php/sealform.php`）と Python（`server/python/sealform_check.py`）にも同じ判定の関数があります。Node・Express・Next.js・Flask・PHP・WordPress の動く例は [examples/](examples/README.md) にあります。
 
 ```js
 import { isSealed, isSealedFile } from "sealform";
@@ -87,6 +96,16 @@ npx sealform open --key sealform-private-key-<kid>.json --form /contact --out ./
 CSV やメール本文をそのまま渡しても、`sf2.`（または v0.1 の `sf1.`）で始まる暗号文だけを拾います。
 添付ファイル（`.sf`）は `--out` のフォルダに元の名前で書き出します。
 エンジニアでない担当者には、`dist/sealform-opener.html`（オフラインで動く復号ツール）を渡してください。
+
+### 秘密鍵の紛失に備える（紙の復旧コード）
+
+```bash
+npx sealform recovery export sealform-private-key-<kid>.json   # 印刷用の HTML ができる
+npx sealform recovery import                                    # 紙のコードを入力して秘密鍵ファイルを作り直す
+```
+
+復旧コードは**パスフレーズ無しで秘密鍵になります**。印刷したら HTML ファイルは消し、紙を金庫など鍵のかかる場所に保管してください。
+書き写しの誤り（1文字違い・入れ替え・抜け）は検査値で検出します。
 
 ### 鍵の更新
 
@@ -143,9 +162,17 @@ npx sealform check https://example.org/contact --fingerprint "SHA256:..."
 ```bash
 npm install
 npm run build     # dist/ を作る
-npm test          # 56 件のテスト
+npm test          # 76 件のテスト
 npm run example   # http://localhost:8787 でデモ
+npm run build:wordpress   # WordPress プラグインの zip
+python3 server/python/test_sealform_check.py   # Python の検証関数
+php server/php/test.php                          # PHP の検証関数
 ```
+
+テストベクタ:
+- `test-vectors/xwing-draft-10.json` — X-Wing の仕様書（draft-connolly-cfrg-xwing-kem-10）付録の公式ベクタ。使っている実装が仕様どおりかを確かめる
+- `test-vectors/sealform-sf2.json` — sealform の形式の復号ベクタ（正常系と、改ざん・宛先違いなどの異常系）。別の言語で実装するときの答え合わせ用
+- `test-vectors/validator.json` — サーバー側の検証関数のベクタ。Node・PHP・Python で同じ結果になることを確かめる
 
 - 暗号文と鍵の形式: [docs/FORMAT.md](docs/FORMAT.md)
 - 要件定義: [docs/REQUIREMENTS.md](docs/REQUIREMENTS.md)

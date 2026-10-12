@@ -1,5 +1,18 @@
 # 変更履歴
 
+## 0.3.0（2026-10-12）
+
+- 紙の復旧コード: `sealform recovery export / import`。秘密鍵を検査値付きの Crockford Base32 にし、印刷用 HTML を出力する
+- サーバー側の受け取り例: Express・Next.js・Flask・PHP（examples/）。PHP と Python の検証関数（server/）
+- WordPress プラグイン（wordpress/sealform、`npm run build:wordpress`）: Contact Form 7 のフォームを丸ごと暗号化し、CF7 の値の検査を暗号文向けに差し替える
+- submit イベントを document の捕捉段階で受け取り、他のスクリプトに渡さないようにした（CF7 などが平文を AJAX 送信するのを防ぐ）
+- サーバーが差し戻した暗号文が入力欄に入っていたら空にする（二重の暗号化を防ぐ）
+- `data-sealform-manual`: 自動初期化しない指定（React などで自分で attach するとき）。最新の表示を `data-sealform-message` にも残す
+- 英語表示: `<html lang="en">` または `data-sealform-lang="en"`。README.en.md
+- テストベクタ: X-Wing 公式ベクタ（draft-10）、sealform の復号ベクタ、Node・PHP・Python 共通の検証関数ベクタ
+- 配布物のハッシュは `npm run release:build` のときだけ hashes.json に記録し、記録済みの版の中身が変わっていたら止める
+- CI（Node 20/22/24、PHP 7.4、Python 3.9）と、provenance 付きで npm に公開する Release ワークフロー
+
 ## 0.2.0（2026-10-12）
 
 暗号文の形式が sf2 に変わった。v0.1.0 の暗号文（sf1）は引き続き復号できる。

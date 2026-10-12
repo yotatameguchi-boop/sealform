@@ -16,11 +16,21 @@ await build({
 const browserJs = await readFile("dist/sealform.js");
 const hash = sha384(browserJs);
 // 版ごとのハッシュを残す（sealform check が「公式の配布物か」を照合する）
+// 記録するのは --release のときだけ。記録済みの版の中身が変わっていたら止める（版の上げ忘れ）
+const release = process.argv.includes("--release");
 let hashes = {};
 try { hashes = JSON.parse(await readFile("hashes.json", "utf8")); } catch {}
-hashes[pkg.version] = hash;
-await writeFile("hashes.json", JSON.stringify(hashes, null, 2) + "\n");
-await writeFile("dist/hashes.json", JSON.stringify(hashes, null, 2) + "\n");
+if (release) {
+  if (hashes[pkg.version] && hashes[pkg.version] !== hash) {
+    console.error(`hashes.json の ${pkg.version} と配布物が一致しません。package.json の version を上げてください`);
+    process.exit(1);
+  }
+  hashes[pkg.version] = hash;
+  await writeFile("hashes.json", JSON.stringify(hashes, null, 2) + "\n");
+}
+// 手元のビルドは「+dev」として同梱する（デモや check の動作確認用）
+const bundled = hashes[pkg.version] === hash ? hashes : { ...hashes, [`${pkg.version}+dev`]: hash };
+await writeFile("dist/hashes.json", JSON.stringify(bundled, null, 2) + "\n");
 
 // npm 用ライブラリと CLI（依存は node_modules から読む）
 await build({

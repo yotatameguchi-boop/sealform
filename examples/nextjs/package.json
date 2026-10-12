@@ -1,0 +1,22 @@
+{
+  "name": "sealform-example-nextjs",
+  "private": true,
+  "scripts": {
+    "predev": "node scripts/prepare.mjs",
+    "dev": "next dev -p 8791",
+    "prebuild": "node scripts/prepare.mjs",
+    "build": "next build",
+    "start": "next start -p 8791"
+  },
+  "dependencies": {
+    "next": "^16.0.0",
+    "react": "^19.2.0",
+    "react-dom": "^19.2.0",
+    "sealform": "file:../.."
+  },
+  "devDependencies": {
+    "@types/node": "^22",
+    "@types/react": "^19",
+    "typescript": "^5"
+  }
+}

@@ -1,0 +1,38 @@
+name: CI
+on:
+  push:
+    branches: [main]
+  pull_request:
+permissions:
+  contents: read
+jobs:
+  node:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        node: [20, 22, 24]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+          cache: npm
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm run build
+      - run: npm test
+      # ブラウザ用ファイルの上限（N-01: gzip 後 60KB）
+      - run: test "$(gzip -9c dist/sealform.js | wc -c)" -le 61440
+  validators:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.9"
+      - run: python server/python/test_sealform_check.py
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: "7.4"
+      - run: php server/php/test.php
+      - run: php -l wordpress/sealform/sealform.php

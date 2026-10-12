@@ -1,0 +1,39 @@
+# v* のタグを push すると、npm に provenance 付きで公開し、GitHub Release に配布物とハッシュを載せる。
+# 事前に、リポジトリの Secrets に NPM_TOKEN を登録しておくこと。
+name: Release
+on:
+  push:
+    tags: ["v*"]
+permissions:
+  contents: write   # GitHub Release の作成
+  id-token: write   # npm provenance（Sigstore 署名）
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          registry-url: https://registry.npmjs.org
+      - run: npm ci
+      - name: タグと package.json の版が一致するか
+        run: test "v$(node -p 'require("./package.json").version')" = "$GITHUB_REF_NAME"
+      # --release: hashes.json に記録済みの版と配布物が食い違っていたら止まる
+      - run: npm run release:build
+      - run: npm test
+      - name: 配布物が、コミットされた hashes.json の記録と一致するか
+        run: git diff --exit-code hashes.json
+      - run: npm run build:wordpress
+      - run: npm publish --provenance --access public
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+      - name: GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          sha384=$(node -p 'require("./hashes.json")[require("./package.json").version]')
+          gh release create "$GITHUB_REF_NAME" \
+            dist/sealform.js dist/sealform-opener.html dist/wordpress/sealform.zip hashes.json \
+            --title "$GITHUB_REF_NAME" \
+            --notes "sealform.js の integrity: \`$sha384\`  変更点は CHANGELOG.md を参照。"

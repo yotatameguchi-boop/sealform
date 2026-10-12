@@ -1,0 +1,6 @@
+.next/
+node_modules/
+public/sealform.js
+public/.well-known/
+sealform.config.json
+next-env.d.ts
