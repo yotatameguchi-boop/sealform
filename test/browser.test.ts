@@ -1,7 +1,7 @@
 // @vitest-environment happy-dom
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { attach } from "../src/browser.js";
-import { generateKeyPair, isSealed, open, type KeyPair } from "../src/core.js";
+import { generateKeyPair, isSealed, isSealedFile, open, openFile, type KeyPair } from "../src/core.js";
 
 let kp: KeyPair;
 let submitted: FormData[];
@@ -61,7 +61,7 @@ describe("フォームへの組み込み", () => {
     const body = fd.getAll("body");
     expect(body).toHaveLength(1);
     expect(isSealed(body[0])).toBe(true);
-    const r = await open(kp.privateKey, kp.publicDoc.kid, body[0] as string, { form: "/contact", field: "body" });
+    const r = await open({ kid: kp.publicDoc.kid, privateKey: kp.privateKey }, body[0] as string, { form: "/contact", field: "body" });
     expect(r.plaintext).toBe("いじめの相談です");
     // 画面上の入力欄は書き換えない
     expect(form.querySelector("textarea")!.value).toBe("いじめの相談です");
@@ -99,12 +99,65 @@ describe("フォームへの組み込み", () => {
     expect(form.querySelector("button")!.disabled).toBe(true);
   });
 
-  it("全項目モードで添付ファイルがあると、平文で漏れないよう送信を止める", async () => {
-    const form = mount(FORM().replace(" data-seal>", ">").replace("<p data", '<input type="file" name="doc"><p data'));
+  it("添付ファイルは暗号化したファイルに入れ替えて送る（元の名前は送らない）", async () => {
+    const form = mount(FORM('method="post" enctype="multipart/form-data"', '<input type="file" name="doc" data-seal>'));
+    const input = form.querySelector<HTMLInputElement>("input[type=file]")!;
+    const original = new File(["診断書の中身"], "診断書.pdf", { type: "application/pdf" });
+    const dt = new DataTransfer();
+    dt.items.add(original);
+    input.files = dt.files;
+    await until(() => form.dataset.sealformState === "ready");
+    form.requestSubmit();
+    await until(() => submitted.length === 1);
+    const sent = submitted[0]!.get("doc") as File;
+    expect(sent.name).toMatch(/^sealed-[0-9a-f]{16}\.sf$/);
+    const bytes = new Uint8Array(await sent.arrayBuffer());
+    expect(isSealedFile(bytes)).toBe(true);
+    const r = await openFile({ kid: kp.publicDoc.kid, privateKey: kp.privateKey }, bytes, { form: "/contact", field: "doc" });
+    expect(r.name).toBe("診断書.pdf");
+    expect(new TextDecoder().decode(r.data)).toBe("診断書の中身");
+  });
+
+  it("添付ファイルを暗号化するのに multipart でなければ、最初から送信できない", async () => {
+    const form = mount(FORM('method="post"', '<input type="file" name="doc" data-seal>'));
+    expect(form.dataset.sealformState).toBe("error");
+    expect(form.querySelector("[data-sealform-status]")!.textContent).toContain("multipart/form-data");
+    expect(form.querySelector("button")!.disabled).toBe(true);
+  });
+
+  it("上限を超える添付ファイルは送らずに止める", async () => {
+    const form = mount(FORM('method="post" enctype="multipart/form-data" data-sealform-max-mb="0.001"', '<input type="file" name="doc" data-seal>'));
+    const input = form.querySelector<HTMLInputElement>("input[type=file]")!;
+    const dt = new DataTransfer();
+    dt.items.add(new File([new Uint8Array(5000)], "big.bin"));
+    input.files = dt.files;
     await until(() => form.dataset.sealformState === "ready");
     form.requestSubmit();
     await until(() => form.dataset.sealformState === "error");
     expect(submitted).toHaveLength(0);
-    expect(form.querySelector("[data-sealform-status]")!.textContent).toContain("添付ファイル");
+    expect(form.querySelector("[data-sealform-status]")!.textContent).toContain("大きすぎ");
+  });
+
+  it("鍵の束なら全員に宛てて暗号化し、全員の指紋が登録されていれば送れる", async () => {
+    const other = await generateKeyPair();
+    const set = { sealform: 1, type: "key-set", keys: [kp.publicDoc, other.publicDoc] };
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify(set))));
+    const fps = `${kp.publicDoc.fingerprint} ${other.publicDoc.fingerprint}`;
+    const form = mount(FORM(`method="post" data-sealform-fingerprint="${fps}"`));
+    await until(() => form.dataset.sealformState === "ready");
+    expect(form.querySelector("[data-sealform-status]")!.textContent).toContain("2 個");
+    form.requestSubmit();
+    await until(() => submitted.length === 1);
+    const t = submitted[0]!.get("body") as string;
+    expect((await open({ kid: other.publicDoc.kid, privateKey: other.privateKey }, t)).plaintext).toBe("いじめの相談です");
+  });
+
+  it("鍵の束に登録外の鍵が混ざっていたら送れない", async () => {
+    const evil = await generateKeyPair();
+    const set = { sealform: 1, type: "key-set", keys: [kp.publicDoc, evil.publicDoc] };
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify(set))));
+    const form = mount(FORM(`method="post" data-sealform-fingerprint="${kp.publicDoc.fingerprint}"`));
+    await until(() => form.dataset.sealformState === "error");
+    expect(form.querySelector("button")!.disabled).toBe(true);
   });
 });

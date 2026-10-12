@@ -10,6 +10,7 @@
   label { display: block; margin: 16px 0 4px; font-weight: 600; }
   input, textarea { width: 100%; box-sizing: border-box; font: inherit; padding: 8px 10px; border: 1px solid #ccc; border-radius: 6px; }
   textarea { min-height: 160px; }
+  input[type=file] { border: 0; padding: 0; }
   button { margin-top: 16px; font: inherit; padding: 10px 24px; border: 0; border-radius: 6px; background: #2f5d50; color: #fff; }
   button:disabled { opacity: .45; }
   [data-sealform-status] { font-size: .9rem; color: #2f5d50; }
@@ -18,14 +19,17 @@
 </head>
 <body>
 <h1>相談フォーム</h1>
-<p>お名前と相談内容は、このブラウザの中で暗号化してから送信されます。サーバーの管理者も読むことはできません。</p>
-<form method="post" action="/contact"
+<p>お名前・相談内容・添付ファイルは、このブラウザの中で暗号化してから送信されます。読めるのは相談員だけで、サーバーの管理者も読むことはできません。</p>
+<form method="post" action="/contact" enctype="multipart/form-data"
       data-sealform-key="/.well-known/sealform-key.json"
-      data-sealform-fingerprint="__FINGERPRINT__">
+      data-sealform-fingerprint="__FINGERPRINT__"
+      data-sealform-max-mb="10">
   <label for="name">お名前（匿名可）</label>
   <input id="name" name="name" data-seal autocomplete="off">
   <label for="message">相談内容</label>
   <textarea id="message" name="message" data-seal required></textarea>
+  <label for="attachment">添付ファイル（任意・10MB まで）</label>
+  <input id="attachment" type="file" name="attachment" data-seal multiple>
   <p data-sealform-status aria-live="polite"></p>
   <noscript><p>このフォームは JavaScript を有効にしないと送信できません（暗号化のため）。</p></noscript>
   <button type="submit" disabled data-sealform-submit>暗号化して送信</button>

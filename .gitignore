@@ -1,5 +1,5 @@
 node_modules/
 dist/
 *.private-key.json
-sealform-private-key.json
+sealform-private-key*.json
 examples/.data/

@@ -7,9 +7,9 @@ describe("秘密鍵ファイル", () => {
     const kp = await generateKeyPair();
     const file = await protectPrivateKey(kp.privateKey, kp.publicDoc.publicKey, "correct horse battery");
     expect(JSON.stringify(file)).not.toContain(Buffer.from(kp.privateKey).toString("base64url"));
-    const { kid, privateKey } = await unlockPrivateKey(JSON.parse(JSON.stringify(file)), "correct horse battery");
+    const unlocked = await unlockPrivateKey(JSON.parse(JSON.stringify(file)), "correct horse battery");
     const t = await seal(await loadPublicKey(kp.publicDoc), "ok", { form: "/f", field: "x" });
-    expect((await open(privateKey, kid, t)).plaintext).toBe("ok");
+    expect((await open(unlocked, t)).plaintext).toBe("ok");
   });
 
   it("パスフレーズが違えば開けない", async () => {

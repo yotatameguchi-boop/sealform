@@ -6,14 +6,16 @@
 ```html
 <script src="/sealform.js" integrity="sha384-..." crossorigin="anonymous" defer></script>
 
-<form method="post" action="/contact" data-sealform-key="/.well-known/sealform-key.json">
+<form method="post" action="/contact" enctype="multipart/form-data"
+      data-sealform-key="/.well-known/sealform-key.json">
   <textarea name="message" data-seal></textarea>          <!-- この欄を暗号化 -->
+  <input type="file" name="attachment" data-seal>         <!-- 添付ファイルも暗号化 -->
   <p data-sealform-status></p>
   <button type="submit" disabled data-sealform-submit>送信</button>  <!-- JS が動くまで押せない -->
 </form>
 ```
 
-> 状態: v0.1（試作）。暗号の専門家による第三者レビューはまだ受けていません。本番の重要なデータに使う前に、下の「守れないもの」を読んでください。
+> 状態: v0.2（試作）。暗号の専門家による第三者レビューはまだ受けていません。本番の重要なデータに使う前に、下の「守れないもの」を読んでください。
 
 ## なぜ必要か
 
@@ -29,6 +31,9 @@ sealform を使うと、サーバーは**平文に一度も触れません**。�
 | **耐量子ハイブリッド** | HPKE（RFC 9180）＋ X-Wing（X25519 + ML-KEM-768）。どちらか一方が安全なら安全。「今盗んで後で解読」にも備える |
 | **既存フォームに後付け** | script 1行と属性だけ。暗号文は元の name のまま送るので、サーバー側の処理はほぼそのまま |
 | **フェイルクローズ** | JS 無効・鍵が取れない・暗号化失敗のときは**送信自体ができない**。平文で送り直すことはしない |
+| **複数の担当者** | 相談員が何人いても、それぞれ自分の秘密鍵だけで読める。1人が鍵を失くしても他の人が読める |
+| **添付ファイル** | 中身だけでなく、元のファイル名と種類も暗号化する。大きさも 4KB 単位に丸める |
+| **鍵の更新** | 新しい鍵を足して古い鍵を外すだけ。古い秘密鍵を手元に残せば、過去の相談も読める |
 | **差し替え・使い回しの検出** | 宛先フォームと項目名を暗号文に結びつける。別フォーム宛ての暗号文を混ぜても復号時に分かる |
 | **外からの改ざん監視** | `sealform check` が、配っている JS が公式の配布物と同じか、公開鍵の指紋が変わっていないかを別の場所から確かめる |
 | **オフライン復号** | 担当者向けの復号ツールは HTML 1ファイル。CSP でネットワークを完全に遮断して動く |
@@ -37,13 +42,18 @@ sealform を使うと、サーバーは**平文に一度も触れません**。�
 
 ### 1. 鍵を作る（担当者の手元で）
 
+担当者がそれぞれ自分の PC で鍵を作り、公開鍵だけを集めて「鍵の束」にします。
+
 ```bash
-npx sealform keygen
+npx sealform keygen --label 相談員A          # 各担当者が手元で実行
+npx sealform keys add sealform-key.json sealform-key-<kid>.json ...   # 公開鍵を束ねる
 ```
 
-- `sealform-key.json`（公開鍵）→ サイトの `/.well-known/sealform-key.json` に置く
-- `sealform-private-key.json`（秘密鍵、パスフレーズで保護）→ **サーバーには置かない**
-- 表示された指紋（`SHA256:...`）を控えておく
+- `sealform-key.json`（鍵の束）→ サイトの `/.well-known/sealform-key.json` に置く
+- `sealform-private-key-<kid>.json`（秘密鍵、パスフレーズで保護）→ **サーバーには置かない**
+- `keys add` / `keys list` が表示する指紋（`SHA256:...`）を控えておく
+
+1人だけで運用する場合は、束に鍵を1つだけ入れます。
 
 ### 2. フォームに組み込む
 
@@ -51,28 +61,44 @@ npx sealform keygen
 
 - `method="post"`（GET だと暗号文が URL とアクセスログに載るため、sealform は動きません）
 - 送信ボタンは `disabled data-sealform-submit` にしておく（JS が動かないときに平文で送られないように）
-- `data-seal` を付けた項目だけが暗号化されます。1つも付けなければ hidden 以外の全項目が対象です
-- 公開鍵を別の場所から配るときは `data-sealform-fingerprint="SHA256:..."` で指紋を固定できます
+- `data-seal` を付けた項目だけが暗号化されます。1つも付けなければ hidden 以外の全項目（添付ファイルを含む）が対象です
+- 添付ファイルを暗号化するときは `enctype="multipart/form-data"` が必要です。上限は 50MB で、`data-sealform-max-mb="10"` のように下げられます
+- `data-sealform-fingerprint="SHA256:... SHA256:..."` で使う鍵の指紋を固定できます（空白区切りで全員分）。束に知らない鍵が足されていたら送信できなくなります
 
 `npx sealform sri` で `integrity` に書く値が出ます。
 
 ### 3. サーバー側
 
-受け取った値をそのまま保存するだけです。平文が混ざって届いていないかは `isSealed()` で確かめられます。
+受け取った値をそのまま保存するだけです。平文が混ざって届いていないかは `isSealed()` / `isSealedFile()` で確かめられます。
 
 ```js
-import { isSealed } from "sealform";
-if (!isSealed(req.body.message)) return res.status(400).send("暗号化されていません");
+import { isSealed, isSealedFile } from "sealform";
+if (!isSealed(form.get("message"))) return res.status(400).send("暗号化されていません");
+const file = form.get("attachment");   // 名前は sealed-xxxx.sf、中身は暗号文
+if (file.size > 0 && !isSealedFile(new Uint8Array(await file.arrayBuffer()))) return res.status(400).end();
 ```
 
 ### 4. 復号する（担当者の手元で）
 
 ```bash
-npx sealform open --key sealform-private-key.json --form /contact submissions.csv
+npx sealform open --key sealform-private-key-<kid>.json --form /contact --out ./decrypted submissions.csv files/*.sf
 ```
 
-CSV やメール本文をそのまま渡しても、`sf1.` で始まる暗号文だけを拾います。
+CSV やメール本文をそのまま渡しても、`sf2.`（または v0.1 の `sf1.`）で始まる暗号文だけを拾います。
+添付ファイル（`.sf`）は `--out` のフォルダに元の名前で書き出します。
 エンジニアでない担当者には、`dist/sealform-opener.html`（オフラインで動く復号ツール）を渡してください。
+
+### 鍵の更新
+
+```bash
+npx sealform keygen --label "相談員A（2027）"
+npx sealform keys add sealform-key.json sealform-key-<新しい kid>.json   # しばらく新旧の両方に宛てる
+npx sealform keys remove sealform-key.json <古い kid>
+npx sealform open --key 新しい秘密鍵.json --key 古い秘密鍵.json submissions.csv   # 過去の相談も開ける
+```
+
+HTML の `data-sealform-fingerprint` と `check --fingerprint` の指紋も入れ替えてください。期限の 30 日前になると `check` が知らせます。
+最後の1つの鍵は外せません。
 
 ### 5. 外から点検する
 
@@ -84,7 +110,7 @@ npx sealform check https://example.org/contact --fingerprint "SHA256:..."
 ✓ CSP で読み込めるスクリプトが制限されています
 ✓ method は POST です
 ✓ JS が動くまで送信ボタンは押せません
-✓ 公開鍵の指紋が登録したものと一致します
+✓ 暗号化に使われる鍵 2 個は、すべて登録したものです
 ✓ integrity（SRI）と配信中の JS が一致します
 ✓ 配信中の JS は公式の配布物と同一です
 ```
@@ -99,7 +125,8 @@ npx sealform check https://example.org/contact --fingerprint "SHA256:..."
 - アクセスログ・エラー監視・解析ツールへの平文の混入
 - CDN・WAF・ホスティング事業者からの閲覧
 - 将来の量子計算機による解読（ハイブリッド KEM）
-- 暗号文の改ざん、別フォーム・別項目への差し替え
+- 暗号文の改ざん、別フォーム・別項目への差し替え、宛先の一部の削除
+- 鍵の束に攻撃者の鍵を足して写しを受け取ること（指紋を固定している場合）
 
 ### 守れないもの
 
@@ -109,14 +136,14 @@ npx sealform check https://example.org/contact --fingerprint "SHA256:..."
   - `sealform check` を別の場所から定期実行し、JS と公開鍵の差し替えに気づく
 - 利用者の端末のマルウェア、ブラウザ拡張による盗み見
 - 担当者の端末や秘密鍵の漏えい
-- 「送信したこと」「時刻」「おおよその大きさ」などのメタデータ
+- 「送信したこと」「時刻」「おおよその大きさ」「宛先の鍵の kid」などのメタデータ
 
 ## 開発
 
 ```bash
 npm install
 npm run build     # dist/ を作る
-npm test          # 30 件のテスト
+npm test          # 56 件のテスト
 npm run example   # http://localhost:8787 でデモ
 ```
 

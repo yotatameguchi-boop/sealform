@@ -6,7 +6,7 @@ import { createHash } from "node:crypto";
 const JS = "/*sealform*/console.log(1)";
 const JS_HASH = "sha384-" + createHash("sha384").update(JS).digest("base64");
 
-function site(kp: KeyPair, opts: { html?: string; js?: string; csp?: string | null } = {}) {
+function site(kp: KeyPair | object, opts: { html?: string; js?: string; csp?: string | null } = {}) {
   const html = opts.html ?? `<!doctype html>
 <script src="/sealform.js" integrity="${JS_HASH}" crossorigin="anonymous"></script>
 <form method="post" action="/contact" data-sealform-key="/.well-known/sealform-key.json">
@@ -19,7 +19,7 @@ function site(kp: KeyPair, opts: { html?: string; js?: string; csp?: string | nu
     if (opts.csp !== null) headers["content-security-policy"] = opts.csp ?? "default-src 'self'";
     if (u.pathname === "/") return new Response(html, { headers });
     if (u.pathname === "/sealform.js") return new Response(opts.js ?? JS);
-    if (u.pathname === "/.well-known/sealform-key.json") return new Response(JSON.stringify(kp.publicDoc));
+    if (u.pathname === "/.well-known/sealform-key.json") return new Response(JSON.stringify("publicDoc" in kp ? kp.publicDoc : kp));
     return new Response("", { status: 404 });
   }) as typeof fetch;
 }
@@ -30,7 +30,7 @@ describe("sealform check", () => {
   it("正しく設定されたページは問題なし", async () => {
     const kp = await generateKeyPair();
     const fs = await checkSite("https://example.org/", {
-      fetch: site(kp), fingerprint: kp.publicDoc.fingerprint, knownScriptHashes: [JS_HASH],
+      fetch: site(kp), fingerprints: [kp.publicDoc.fingerprint], knownScriptHashes: [JS_HASH],
     });
     expect(fs.filter((f) => f.level !== "pass")).toEqual([]);
   });
@@ -39,7 +39,7 @@ describe("sealform check", () => {
     const kp = await generateKeyPair();
     const attacker = await generateKeyPair();
     const fs = await checkSite("https://example.org/", {
-      fetch: site(attacker), fingerprint: kp.publicDoc.fingerprint, knownScriptHashes: [JS_HASH],
+      fetch: site(attacker), fingerprints: [kp.publicDoc.fingerprint], knownScriptHashes: [JS_HASH],
     });
     expect(levels(fs, "key")).toEqual(["fail"]);
     expect(fs.find((f) => f.id === "key")!.message).toContain("差し替え");
@@ -52,7 +52,7 @@ describe("sealform check", () => {
     const html = `<script src="/sealform.js" integrity="${evilHash}"></script>
 <form method="post" data-sealform-key="/.well-known/sealform-key.json"><button disabled data-sealform-submit></button></form>`;
     const fs = await checkSite("https://example.org/", {
-      fetch: site(kp, { html, js: evil }), fingerprint: kp.publicDoc.fingerprint, knownScriptHashes: [JS_HASH],
+      fetch: site(kp, { html, js: evil }), fingerprints: [kp.publicDoc.fingerprint], knownScriptHashes: [JS_HASH],
     });
     expect(levels(fs, "sri")).toEqual(["pass"]);
     expect(levels(fs, "script")).toEqual(["fail"]);
@@ -74,5 +74,27 @@ describe("sealform check", () => {
     expect(levels(fs, "submit-guard")).toEqual(["fail"]);
     expect(levels(fs, "csp")).toEqual(["warn"]);
     expect(levels(fs, "sri")).toEqual(["warn"]);
+  });
+
+  it("鍵の束に登録外の鍵が足されていたら検出する", async () => {
+    const [a, b, evil] = await Promise.all([generateKeyPair(), generateKeyPair(), generateKeyPair()]);
+    const set = { sealform: 1, type: "key-set", keys: [a.publicDoc, b.publicDoc, evil.publicDoc] };
+    const fs = await checkSite("https://example.org/", {
+      fetch: site(set), fingerprints: [a.publicDoc.fingerprint, b.publicDoc.fingerprint], knownScriptHashes: [JS_HASH],
+    });
+    expect(levels(fs, "key")).toEqual(["fail"]);
+    expect(fs.find((f) => f.id === "key")!.message).toContain(evil.publicDoc.fingerprint);
+  });
+
+  it("鍵の更新で外した鍵が登録に残っていれば知らせ、期限が近い鍵も知らせる", async () => {
+    const cur = await generateKeyPair({ validDays: 10, label: "相談員A" });
+    const old = await generateKeyPair();
+    const set = { sealform: 1, type: "key-set", keys: [cur.publicDoc] };
+    const fs = await checkSite("https://example.org/", {
+      fetch: site(set), fingerprints: [cur.publicDoc.fingerprint, old.publicDoc.fingerprint], knownScriptHashes: [JS_HASH],
+    });
+    expect(levels(fs, "key")).toEqual(["pass"]);
+    expect(levels(fs, "key-missing")).toEqual(["warn"]);
+    expect(fs.find((f) => f.id === "key-expiry")!.message).toContain("相談員A");
   });
 });

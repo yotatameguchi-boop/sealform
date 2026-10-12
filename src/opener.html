@@ -33,27 +33,30 @@
   pre { margin:0; white-space:pre-wrap; word-break:break-word; font:inherit; }
   .note { color:var(--muted); font-size:.85rem; }
   .scroll { overflow-x:auto; }
+  a { color: var(--accent); }
+  #sealed-files { margin: 8px 0 0; padding-left: 1.2em; }
 </style>
 </head>
 <body>
 <main>
   <h1>sealform 復号ツール</h1>
-  <p class="lead">このファイルはネットワークに接続せずに動きます。秘密鍵・パスフレーズ・復号した内容は、どこにも送信も保存もされません。</p>
+  <p class="lead">このファイルはネットワークに接続せずに動きます。秘密鍵・パスフレーズ・復号した内容は、どこにも送信されません。添付ファイルは「保存」を押したときだけ手元に保存されます。</p>
 
   <fieldset>
     <legend>1. 鍵</legend>
-    <label for="key">秘密鍵ファイル（sealform-private-key.json）</label>
-    <input id="key" type="file" accept=".json,application/json">
-    <label for="pass">パスフレーズ</label>
+    <label for="key">秘密鍵ファイル（sealform-private-key-….json）。鍵を更新した場合は、古い鍵も一緒に選ぶと古い暗号文も開けます</label>
+    <input id="key" type="file" accept=".json,application/json" multiple>
+    <label for="pass">パスフレーズ（鍵ごとに違う場合は、1つずつ実行してください）</label>
     <input id="pass" type="password" autocomplete="off">
   </fieldset>
 
   <fieldset>
-    <legend>2. 暗号文</legend>
+    <legend>2. 暗号文・暗号化された添付ファイル</legend>
     <label for="tokens">暗号文を貼り付け（CSV やメール本文をそのまま貼っても、sf1. で始まる部分だけを拾います）</label>
     <textarea id="tokens" spellcheck="false"></textarea>
-    <label for="tokens-file">またはファイルから読み込む</label>
-    <input id="tokens-file" type="file">
+    <label for="tokens-file">ファイルから読み込む（CSV などのテキスト、または暗号化された添付ファイル .sf）</label>
+    <input id="tokens-file" type="file" multiple>
+    <ul id="sealed-files" class="note"></ul>
     <label for="expect-form">宛先フォームを限定する（任意。例: /contact）</label>
     <input id="expect-form" type="text" placeholder="指定すると、別のフォーム宛ての暗号文を拒否します">
   </fieldset>

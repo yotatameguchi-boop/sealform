@@ -1,4 +1,4 @@
-import { loadPublicKey, SealformError } from "./core.js";
+import { loadKeys, SealformError } from "./core.js";
 
 /**
  * 公開中のページを外から点検する。
@@ -17,8 +17,8 @@ export interface Finding {
 }
 
 export interface CheckOptions {
-  /** 登録しておいた公開鍵の指紋（SHA256:...）。変わっていたら差し替えを疑う。 */
-  fingerprint?: string;
+  /** 登録しておいた公開鍵の指紋（SHA256:...）。複数の担当者・更新中の新旧の鍵なら全部並べる。 */
+  fingerprints?: string[];
   /** 公式に配布している sealform.js の SHA-384（"sha384-..."）。 */
   knownScriptHashes?: string[];
   fetch?: typeof fetch;
@@ -120,9 +120,11 @@ export async function checkSite(pageUrl: string, opts: CheckOptions = {}): Promi
     else add("fields", "pass", `${label}暗号化される項目: ${sealed.map((t) => t.attrs.get("name") ?? "?").join(", ")}`);
 
     keyUrls.add(new URL(form.attrs.get("data-sealform-key")!, page).href);
-    const pinned = form.attrs.get("data-sealform-fingerprint");
-    if (pinned && opts.fingerprint && pinned !== opts.fingerprint) {
-      add("pin", "fail", `${label}ページに書かれた指紋が、登録した指紋と違います（${pinned}）`);
+    const pinned = (form.attrs.get("data-sealform-fingerprint") ?? "").split(/[\s,]+/).filter(Boolean);
+    const registered = opts.fingerprints ?? [];
+    const strange = pinned.filter((p) => registered.length > 0 && !registered.includes(p));
+    if (strange.length > 0) {
+      add("pin", "fail", `${label}ページに、登録していない指紋が書かれています（${strange.join(", ")}）`);
     }
   }
 
@@ -139,15 +141,27 @@ export async function checkSite(pageUrl: string, opts: CheckOptions = {}): Promi
       add("key", "fail", `公開鍵を取得できません: ${url}（${e instanceof Error ? e.message : e}）`);
       continue;
     }
+    const registered = opts.fingerprints ?? [];
     try {
-      const k = await loadPublicKey(doc, { pin: opts.fingerprint, now: opts.now });
-      if (opts.fingerprint) add("key", "pass", `公開鍵の指紋が登録したものと一致します（${k.doc.fingerprint}）`);
-      else add("key", "warn", `公開鍵は有効ですが、指紋を登録していないため差し替えを検出できません。--fingerprint ${k.doc.fingerprint} を付けて実行してください`);
-      const days = (Date.parse(k.doc.expires) - (opts.now ?? new Date()).getTime()) / 86400_000;
-      if (days < 30) add("key-expiry", "warn", `公開鍵の有効期限まで ${Math.floor(days)} 日です。鍵を更新してください`);
+      const keys = await loadKeys(doc, { pins: registered, now: opts.now });
+      const fps = keys.map((k) => k.doc.fingerprint);
+      if (registered.length > 0) {
+        add("key", "pass", `暗号化に使われる鍵 ${keys.length} 個は、すべて登録したものです`);
+        const missing = registered.filter((r) => !fps.includes(r));
+        if (missing.length > 0) {
+          add("key-missing", "warn", `登録した鍵のうち ${missing.length} 個が使われていません（更新で外した鍵なら登録からも外してください）: ${missing.join(", ")}`);
+        }
+      } else {
+        add("key", "warn", `公開鍵は有効ですが、指紋を登録していないため差し替えを検出できません。${fps.map((f) => `--fingerprint ${f}`).join(" ")} を付けて実行してください`);
+      }
+      for (const k of keys) {
+        const days = (Date.parse(k.doc.expires) - (opts.now ?? new Date()).getTime()) / 86400_000;
+        const who = k.doc.label ? `「${k.doc.label}」の` : "";
+        if (days < 30) add("key-expiry", "warn", `${who}公開鍵（${k.doc.kid}）の有効期限まで ${Math.floor(days)} 日です。鍵を更新してください`);
+      }
     } catch (e) {
       const msg = e instanceof SealformError && e.code === "fingerprint-mismatch"
-        ? `公開鍵が差し替えられています。${e.message}`
+        ? `公開鍵が差し替えられたか、鍵が追加されています。${e.message}`
         : `公開鍵が不正です: ${e instanceof Error ? e.message : e}`;
       add("key", "fail", msg);
     }
