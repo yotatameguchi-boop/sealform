@@ -17,7 +17,13 @@
 </form>
 ```
 
-> 状態: v0.3（試作）。暗号の専門家による第三者レビューはまだ受けていません。npm にはまだ公開していないため、今は clone して `npm install && npm run build` で使ってください（以下の `npx sealform` は `node dist/cli.js` に読み替え）。本番の重要なデータに使う前に、下の「守れないもの」を読んでください。
+> 状態: v0.3（試作）。暗号の専門家による第三者レビューはまだ受けていません。npm には公開していません。GitHub から直接入れられます（インストール時に自動でビルドされます）。
+>
+> ```bash
+> npm install github:yotatameguchi-boop/sealform#v0.3.0
+> ```
+>
+> 以下の `npx sealform` は、入れたあとならそのまま、入れずに使うなら `npx github:yotatameguchi-boop/sealform#v0.3.0` に読み替えてください。ビルド済みの `sealform.js`・復号ツールの HTML・WordPress プラグインの zip は [Releases](https://github.com/yotatameguchi-boop/sealform/releases) からダウンロードできます。本番の重要なデータに使う前に、下の「守れないもの」を読んでください。
 
 ## なぜ必要か
 

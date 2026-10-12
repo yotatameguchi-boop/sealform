@@ -12,7 +12,8 @@
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "example": "node examples/server.mjs",
     "release:build": "node build.mjs --release && tsc -p tsconfig.json --emitDeclarationOnly",
-    "build:wordpress": "node scripts/build-wordpress.mjs"
+    "build:wordpress": "node scripts/build-wordpress.mjs",
+    "prepare": "node build.mjs && tsc -p tsconfig.json --emitDeclarationOnly"
   },
   "keywords": [
     "encryption",

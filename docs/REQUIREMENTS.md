@@ -262,7 +262,7 @@ v0.1 では1パッケージにまとめた。利用者が増えて分ける必�
 | N-04 外部通信 | 公開鍵の取得以外は通信しない。復号ツールは CSP で通信を遮断 |
 | N-05 正しさ | X-Wing は仕様書（draft-10）付録の公式ベクタ 3 件で一致を確認。HPKE 本体（RFC 9180）のベクタは使用ライブラリ側のテストに依存 |
 | N-06 互換性 | sealform 独自の復号ベクタ（test-vectors/sealform-sf2.json）と、Node・PHP・Python 共通の検証関数ベクタを用意 |
-| N-07 サプライチェーン | 実行時の依存は 3 個（@hpke/core, @hpke/hybridkem-x-wing, @noble/hashes）。provenance 付きで公開する Release ワークフローを用意（**まだ公開していない**） |
+| N-07 サプライチェーン | 実行時の依存は 3 個（@hpke/core, @hpke/hybridkem-x-wing, @noble/hashes）。npm には公開しない方針（GitHub Release と GitHub からの直接インストールで配布）。NPM_TOKEN を登録すれば provenance 付きで公開できる Release ワークフローは用意済み |
 | N-08 アクセシビリティ | 状態表示に role=status / alert と aria-live。スクリーンリーダーでの実機確認はしていない |
 | N-09 多言語 | ブラウザの表示と README は日英。CLI・復号ツール・仕様書は日本語のみ |
 
@@ -272,7 +272,7 @@ v0.1 では1パッケージにまとめた。利用者が増えて分ける必�
 - WordPress では、JS を通さず平文を直接送ると検査で拒否されることを確認
 - 50MB の添付ファイルの往復（暗号化 41ms・復号 28ms、Node）
 
-残っていること: 第三者レビュー（v1.0 の条件）、npm・GitHub での公開、Safari・Firefox・スマートフォン実機での確認。
+残っていること: 第三者レビュー（v1.0 の条件）、Safari・Firefox・スマートフォン実機での確認。npm への公開はレビュー後に判断する。
 
 ## 14. 未決事項
 

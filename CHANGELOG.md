@@ -11,7 +11,8 @@
 - 英語表示: `<html lang="en">` または `data-sealform-lang="en"`。README.en.md
 - テストベクタ: X-Wing 公式ベクタ（draft-10）、sealform の復号ベクタ、Node・PHP・Python 共通の検証関数ベクタ
 - 配布物のハッシュは `npm run release:build` のときだけ hashes.json に記録し、記録済みの版の中身が変わっていたら止める
-- CI（Node 20/22/24、PHP 7.4、Python 3.9）と、provenance 付きで npm に公開する Release ワークフロー
+- CI（Node 20/22/24、PHP 7.4、Python 3.9）と、タグで GitHub Release を作るワークフロー（npm には公開しない方針。NPM_TOKEN を登録したときだけ provenance 付きで公開する）
+- GitHub から直接インストールできるようにした（`npm install github:yotatameguchi-boop/sealform#v0.3.0`。インストール時に自動でビルド）
 
 ## 0.2.0（2026-10-12）
 
