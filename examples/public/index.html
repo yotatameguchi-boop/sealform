@@ -1,0 +1,34 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>相談フォーム（sealform デモ）</title>
+<script src="/sealform.js" integrity="__INTEGRITY__" crossorigin="anonymous" defer></script>
+<style>
+  body { font: 16px/1.7 system-ui, "Hiragino Sans", sans-serif; max-width: 640px; margin: 40px auto; padding: 0 16px; color: #1c1c1a; background: #fafaf8; }
+  label { display: block; margin: 16px 0 4px; font-weight: 600; }
+  input, textarea { width: 100%; box-sizing: border-box; font: inherit; padding: 8px 10px; border: 1px solid #ccc; border-radius: 6px; }
+  textarea { min-height: 160px; }
+  button { margin-top: 16px; font: inherit; padding: 10px 24px; border: 0; border-radius: 6px; background: #2f5d50; color: #fff; }
+  button:disabled { opacity: .45; }
+  [data-sealform-status] { font-size: .9rem; color: #2f5d50; }
+  form[data-sealform-state=error] [data-sealform-status] { color: #a3312a; }
+</style>
+</head>
+<body>
+<h1>相談フォーム</h1>
+<p>お名前と相談内容は、このブラウザの中で暗号化してから送信されます。サーバーの管理者も読むことはできません。</p>
+<form method="post" action="/contact"
+      data-sealform-key="/.well-known/sealform-key.json"
+      data-sealform-fingerprint="__FINGERPRINT__">
+  <label for="name">お名前（匿名可）</label>
+  <input id="name" name="name" data-seal autocomplete="off">
+  <label for="message">相談内容</label>
+  <textarea id="message" name="message" data-seal required></textarea>
+  <p data-sealform-status aria-live="polite"></p>
+  <noscript><p>このフォームは JavaScript を有効にしないと送信できません（暗号化のため）。</p></noscript>
+  <button type="submit" disabled data-sealform-submit>暗号化して送信</button>
+</form>
+</body>
+</html>

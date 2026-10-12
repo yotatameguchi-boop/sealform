@@ -1,0 +1,77 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<!-- ネットワークへの通信を一切させない。スクリプトはこのファイルに埋め込んだものだけ動く -->
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src '__SCRIPT_HASH__'; style-src 'unsafe-inline'; form-action 'none'; base-uri 'none'">
+<meta name="referrer" content="no-referrer">
+<title>sealform 復号ツール</title>
+<style>
+  :root { --bg:#fafaf8; --fg:#1c1c1a; --muted:#6b6b66; --line:#dcdcd6; --accent:#2f5d50; --err:#a3312a; --card:#fff; }
+  @media (prefers-color-scheme: dark) { :root { --bg:#161615; --fg:#ececea; --muted:#9a9a94; --line:#33332f; --accent:#7fbfa8; --err:#ef8a80; --card:#1f1f1d; } }
+  * { box-sizing: border-box; }
+  body { margin:0; background:var(--bg); color:var(--fg); font:15px/1.7 system-ui, "Hiragino Sans", "Noto Sans JP", sans-serif; }
+  main { max-width: 860px; margin: 0 auto; padding: 32px 16px 64px; }
+  h1 { font-size: 1.4rem; margin: 0 0 4px; }
+  .lead { color: var(--muted); margin: 0 0 24px; }
+  fieldset { border:1px solid var(--line); border-radius:10px; background:var(--card); padding:16px; margin:0 0 16px; }
+  legend { font-weight:600; padding:0 6px; }
+  label { display:block; font-size:.9rem; color:var(--muted); margin: 10px 0 4px; }
+  input[type=password], input[type=text], textarea { width:100%; font:inherit; padding:8px 10px; border:1px solid var(--line); border-radius:6px; background:var(--bg); color:var(--fg); }
+  textarea { min-height: 140px; font-family: ui-monospace, monospace; font-size: 12px; }
+  button { font:inherit; padding:9px 18px; border-radius:6px; border:1px solid var(--accent); background:var(--accent); color:var(--bg); cursor:pointer; }
+  button.secondary { background:transparent; color:var(--accent); }
+  button:disabled { opacity:.5; cursor:wait; }
+  .actions { display:flex; gap:8px; flex-wrap:wrap; }
+  #status { margin: 16px 0; min-height: 1.7em; }
+  #status[data-kind=error] { color: var(--err); }
+  table { width:100%; border-collapse:collapse; background:var(--card); border:1px solid var(--line); border-radius:10px; overflow:hidden; }
+  th, td { text-align:left; vertical-align:top; padding:8px 10px; border-bottom:1px solid var(--line); font-size:.9rem; }
+  th { color: var(--muted); font-weight:600; }
+  tr.error td { color: var(--err); }
+  pre { margin:0; white-space:pre-wrap; word-break:break-word; font:inherit; }
+  .note { color:var(--muted); font-size:.85rem; }
+  .scroll { overflow-x:auto; }
+</style>
+</head>
+<body>
+<main>
+  <h1>sealform 復号ツール</h1>
+  <p class="lead">このファイルはネットワークに接続せずに動きます。秘密鍵・パスフレーズ・復号した内容は、どこにも送信も保存もされません。</p>
+
+  <fieldset>
+    <legend>1. 鍵</legend>
+    <label for="key">秘密鍵ファイル（sealform-private-key.json）</label>
+    <input id="key" type="file" accept=".json,application/json">
+    <label for="pass">パスフレーズ</label>
+    <input id="pass" type="password" autocomplete="off">
+  </fieldset>
+
+  <fieldset>
+    <legend>2. 暗号文</legend>
+    <label for="tokens">暗号文を貼り付け（CSV やメール本文をそのまま貼っても、sf1. で始まる部分だけを拾います）</label>
+    <textarea id="tokens" spellcheck="false"></textarea>
+    <label for="tokens-file">またはファイルから読み込む</label>
+    <input id="tokens-file" type="file">
+    <label for="expect-form">宛先フォームを限定する（任意。例: /contact）</label>
+    <input id="expect-form" type="text" placeholder="指定すると、別のフォーム宛ての暗号文を拒否します">
+  </fieldset>
+
+  <div class="actions">
+    <button id="run" type="button">復号する</button>
+    <button id="clear" type="button" class="secondary">画面を消去</button>
+  </div>
+  <p id="status" role="status" aria-live="polite"></p>
+
+  <div class="scroll">
+    <table id="result-table" hidden>
+      <thead><tr><th>暗号化した日時</th><th>フォーム</th><th>項目</th><th>内容</th></tr></thead>
+      <tbody id="results"></tbody>
+    </table>
+  </div>
+  <p class="note">sealform __VERSION__ ・ 復号した内容を表計算ソフト等に移す場合は、その後の保管にも注意してください。</p>
+</main>
+<script>__SCRIPT__</script>
+</body>
+</html>

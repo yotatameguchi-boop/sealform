@@ -1,0 +1,20 @@
+# 公開中のフォームを1時間ごとに外から点検し、JS や公開鍵の差し替えを検知する。
+# サーバーとは別の場所（GitHub）から確かめるので、サーバーを乗っ取られても検知できる。
+# 使い方: このファイルを .github/workflows/ に置き、URL と指紋を自分のものに書き換える。
+name: sealform check
+on:
+  schedule:
+    - cron: "17 * * * *"
+  workflow_dispatch:
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: 点検
+        run: |
+          npx --yes sealform@0.1.0 check "https://example.org/contact" \
+            --fingerprint "SHA256:ここに keygen で表示された指紋"
+      # 失敗するとジョブが赤くなり、GitHub から通知が届く
