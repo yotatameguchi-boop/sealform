@@ -47,7 +47,7 @@
     "./sealform.js": "./dist/sealform.js"
   },
   "bin": {
-    "sealform": "./dist/cli.js"
+    "sealform": "dist/cli.js"
   },
   "files": [
     "dist",
@@ -58,5 +58,13 @@
   ],
   "engines": {
     "node": ">=20"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/yotatameguchi-boop/sealform.git"
+  },
+  "homepage": "https://github.com/yotatameguchi-boop/sealform#readme",
+  "bugs": {
+    "url": "https://github.com/yotatameguchi-boop/sealform/issues"
   }
 }
