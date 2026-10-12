@@ -42,7 +42,7 @@ jobs:
             echo
             echo "インストール: \`npm install github:${GITHUB_REPOSITORY}#${GITHUB_REF_NAME}\`（インストール時に自動でビルドされます）"
             echo
-            echo "変更点は [CHANGELOG.md](CHANGELOG.md) を参照。"
+            echo "変更点は [CHANGELOG.md](https://github.com/${GITHUB_REPOSITORY}/blob/${GITHUB_REF_NAME}/CHANGELOG.md) を参照。"
           } > notes.md
           gh release create "$GITHUB_REF_NAME" \
             dist/sealform.js dist/sealform-opener.html dist/wordpress/sealform.zip hashes.json \
