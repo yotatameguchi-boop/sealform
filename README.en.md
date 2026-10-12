@@ -17,7 +17,7 @@ Your server, database, logs and CDN only ever see ciphertext. Only the people ho
 </form>
 ```
 
-> Status: v0.3, experimental. It has **not** been reviewed by an independent cryptographer yet. Read "What it does not protect against" below before using it for sensitive data.
+> Status: v0.3, experimental. It has **not** been reviewed by an independent cryptographer yet. It is not on npm yet: clone the repository and run `npm install && npm run build` (read `npx sealform` below as `node dist/cli.js`). Read "What it does not protect against" below before using it for sensitive data.
 
 ## Why
 

@@ -15,6 +15,6 @@ jobs:
           node-version: 22
       - name: 点検
         run: |
-          npx --yes sealform@0.1.0 check "https://example.org/contact" \
+          npx --yes sealform@0.3.0 check "https://example.org/contact" \
             --fingerprint "SHA256:ここに keygen で表示された指紋"
       # 失敗するとジョブが赤くなり、GitHub から通知が届く
