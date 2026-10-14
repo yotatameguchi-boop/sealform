@@ -11,7 +11,8 @@ export async function POST(req: Request) {
   const name = form.get("name");
   const message = form.get("message");
   // 平文が混ざっていたら保存しない（設定ミスや JS の差し替えへの保険）
-  if (!isSealed(name) || !isSealed(message)) return new Response("暗号化されていない値が届きました", { status: 400 });
+  // 空欄は暗号化されずに空のまま届く。任意のお名前は空でもよいが、相談内容は必須
+  if ((name !== "" && !isSealed(name)) || !isSealed(message)) return new Response("暗号化されていない値が届きました", { status: 400 });
   const saved: string[] = [];
   for (const f of form.getAll("attachment")) {
     if (typeof f === "string" || f.size === 0) continue;

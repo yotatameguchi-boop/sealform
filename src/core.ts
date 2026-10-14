@@ -241,10 +241,18 @@ function unpad(data: Uint8Array): Uint8Array {
   return data.subarray(4, 4 + n);
 }
 
-function asArray(keys: LoadedPublicKey | LoadedPublicKey[]): LoadedPublicKey[] {
+/**
+ * 宛先の鍵を確かめる。期限切れの鍵には暗号化しない（読み込んだあと長く開いていたページでも、
+ * 暗号化するその時点の期限で判断する）。過去の暗号文の復号は、期限に関係なく行える。
+ */
+function asArray(keys: LoadedPublicKey | LoadedPublicKey[], now: Date = new Date()): LoadedPublicKey[] {
   const list = Array.isArray(keys) ? keys : [keys];
   if (list.length === 0) throw new SealformError("bad-key", "宛先の鍵がありません");
   if (list.length > MAX_RECIPIENTS) throw new SealformError("bad-key", `宛先にできる鍵は ${MAX_RECIPIENTS} 個までです`);
+  const expired = list.filter((k) => isExpired(k.doc, now));
+  if (expired.length > 0) {
+    throw new SealformError("key-expired", `公開鍵の有効期限が切れています（${expired.map((k) => k.doc.kid).join(", ")}）`);
+  }
   return list;
 }
 
@@ -294,7 +302,7 @@ export async function seal(
   opts: { now?: Date } = {},
 ): Promise<string> {
   const meta: Meta = { v: 2, f: ctx.form, n: ctx.field, t: unixNow(opts.now), k: "text" };
-  const { head, body } = await sealCore(asArray(keys), pad(utf8(plaintext), TEXT_PAD), meta);
+  const { head, body } = await sealCore(asArray(keys, opts.now), pad(utf8(plaintext), TEXT_PAD), meta);
   return `${head}.${b64url(body)}`;
 }
 
@@ -324,7 +332,7 @@ export async function sealFile(
   inner.set(infoBytes, 4);
   inner.set(data, 4 + infoBytes.length);
   const meta: Meta = { v: 2, f: ctx.form, n: ctx.field, t: unixNow(opts.now), k: "file" };
-  const { head, body } = await sealCore(asArray(keys), pad(inner, FILE_PAD), meta);
+  const { head, body } = await sealCore(asArray(keys, opts.now), pad(inner, FILE_PAD), meta);
   const headBytes = utf8(head);
   const len = new Uint8Array(4);
   new DataView(len.buffer).setUint32(0, headBytes.length);
@@ -353,16 +361,34 @@ interface Parsed extends ParsedToken {
   aad: Uint8Array;
 }
 
-/** サーバー側で「暗号文の形をしているか」を確かめる。復号はしない。 */
-export function isSealed(value: unknown): value is string {
-  return typeof value === "string" && (SF2_RE.test(value) || SF1_RE.test(value));
+/** 本文（iv 12 バイト ‖ 暗号文 ‖ 認証タグ 16 バイト）の長さが、丸めの単位に合っているか。 */
+function bodyLengthOk(bodyLength: number, bucket: number, ivBytes = 12): boolean {
+  const ct = bodyLength - ivBytes - 16;
+  return ct >= bucket && ct % bucket === 0;
 }
 
-/** 受け取ったファイルが sealform で暗号化されたものかを確かめる。復号はしない。 */
+/**
+ * サーバー側で「暗号文の形をしているか」を確かめる。復号はしない（サーバーは秘密鍵を持たない）。
+ * 見出しの JSON・種類・宛先一覧の長さ・本文の長さまで確かめるが、**形が正しいことしか分からない**。
+ * 暗号文が本物か（改ざんされていないか）は、秘密鍵で復号するときに初めて分かる。
+ */
+export function isSealed(value: unknown): value is string {
+  if (typeof value !== "string") return false;
+  try {
+    const p = parseToken(value, false);
+    if (p.kind !== "text") return false;
+    if (p.version === "sf1") return p.entries[0]!.enc.length === ENC_BYTES && bodyLengthOk(p.body.length, TEXT_PAD, 0);
+    return bodyLengthOk(p.body.length, TEXT_PAD);
+  } catch {
+    return false;
+  }
+}
+
+/** 受け取ったファイルが sealform で暗号化されたものの形をしているかを確かめる。復号はしない。 */
 export function isSealedFile(data: Uint8Array): boolean {
   try {
-    parseFile(data);
-    return true;
+    const p = parseFile(data);
+    return p.kind === "file" && bodyLengthOk(p.body.length, FILE_PAD);
   } catch {
     return false;
   }
@@ -401,8 +427,8 @@ function parseHead(metaPart: string, rcptPart: string) {
   return { meta, entries };
 }
 
-function parseToken(token: string): Parsed {
-  const t = token.trim();
+function parseToken(token: string, trim = true): Parsed {
+  const t = trim ? token.trim() : token;
   const m2 = SF2_RE.exec(t);
   if (m2) {
     const { meta, entries } = parseHead(m2[1]!, m2[2]!);

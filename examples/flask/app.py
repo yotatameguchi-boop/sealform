@@ -63,7 +63,8 @@ def key_set():
 def contact():
     name, message = request.form.get("name"), request.form.get("message")
     # 平文が混ざっていたら保存しない（設定ミスや JS の差し替えへの保険）
-    if not is_sealed(name) or not is_sealed(message):
+    # 空欄は暗号化されずに空のまま届く。任意のお名前は空でもよいが、相談内容は必須
+    if (name != "" and not is_sealed(name)) or not is_sealed(message):
         abort(400, "暗号化されていない値が届きました")
     saved = []
     for f in request.files.getlist("attachment"):

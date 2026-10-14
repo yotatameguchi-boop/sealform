@@ -9,7 +9,8 @@ if ! wp core is-installed 2>/dev/null; then
     --admin_password="$(head -c 18 /dev/urandom | base64)" --admin_email=admin@example.test --skip-email
 fi
 wp language core install ja --activate >/dev/null 2>&1 || true
-wp plugin install contact-form-7 --activate
+# 検証の再現性のため CF7 の版を固定する（新しい版で試すときはここを変える）
+wp plugin install contact-form-7 --version="${CF7_VERSION:-6.2.2}" --activate --force
 wp plugin activate sealform
 wp option update permalink_structure '/%postname%/'
 wp eval '

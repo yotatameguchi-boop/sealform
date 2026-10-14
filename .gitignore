@@ -5,3 +5,4 @@ sealform-private-key*.json
 examples/.data/
 .venv/
 __pycache__/
+sealform-recovery-*.html

@@ -1,6 +1,6 @@
 {
   "name": "sealform",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "description": "Webフォームの入力をブラウザ内で耐量子ハイブリッド暗号化する（HPKE + X-Wing）",
   "main": "./dist/index.js",
   "directories": {
@@ -30,9 +30,11 @@
   "dependencies": {
     "@hpke/core": "^1.9.0",
     "@hpke/hybridkem-x-wing": "^0.7.0",
-    "@noble/hashes": "^2.4.0"
+    "@noble/hashes": "^2.4.0",
+    "parse5": "^8.0.1"
   },
   "devDependencies": {
+    "@playwright/test": "^1.64.0",
     "@types/node": "^26.6.5",
     "esbuild": "^0.28.2",
     "happy-dom": "^21.0.1",
@@ -58,7 +60,7 @@
     "server/python/sealform_check.py"
   ],
   "engines": {
-    "node": ">=20"
+    "node": ">=20.19.0"
   },
   "repository": {
     "type": "git",

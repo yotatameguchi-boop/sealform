@@ -43,7 +43,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $path === '/contact') {
     $name = $_POST['name'] ?? null;
     $message = $_POST['message'] ?? null;
     // 平文が混ざっていたら保存しない（設定ミスや JS の差し替えへの保険）
-    if (!sealform_is_sealed($name) || !sealform_is_sealed($message)) {
+    // 空欄は暗号化されずに空のまま届く。任意のお名前は空でもよいが、相談内容は必須
+    if (($name !== '' && !sealform_is_sealed($name)) || !sealform_is_sealed($message)) {
         http_response_code(400);
         exit('暗号化されていない値が届きました');
     }

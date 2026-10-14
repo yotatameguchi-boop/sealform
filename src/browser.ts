@@ -22,6 +22,17 @@ import { isSealed, loadKeys, seal, sealFile, SealformError, type LoadedPublicKey
  * フォーム部品（Contact Form 7 など）が自前で平文を AJAX 送信してしまうのを防ぐため。
  *
  * 表示の言語は data-sealform-lang、無ければ祖先の lang 属性で決める（ja / en）。
+ *
+ * 送信の流れ:
+ * 1. その時点のフォームの状態（項目・値・属性・添付ファイル）を記録する
+ * 2. 必須項目を確かめる（サーバーは中身を見られないので、暗号化する前にここで確かめる）
+ * 3. 鍵の期限を確かめ、切れていれば取り直す
+ * 4. DOM に触らずに全部を暗号化する
+ * 5. フォームが 1 の記録から変わっていないかを確かめ、変わっていれば送らない
+ * 6. 待ち時間を挟まずに、暗号文に差し替えて送信する（5 と 6 の間に他の処理は割り込めない）
+ *
+ * 空欄は暗号化せず、空のまま送る（サーバー側の必須チェックを効かせるため）。
+ * そのため「その欄が空だった」ことはサーバーに分かる。
  */
 
 type Lang = "ja" | "en";
@@ -39,6 +50,8 @@ const MESSAGES = {
     noCrypto: "このブラウザは暗号化に対応していないため、送信できません",
     noDataTransfer: "このブラウザでは添付ファイルを暗号化して送れません",
     cleared: "前回の入力内容は暗号化して送信済みのため、ここには表示できません。お手数ですが入力し直してください。",
+    required: (label: string) => `「${label}」は必須です。入力してから送信してください。`,
+    changed: "暗号化している間にフォームの内容が変わったため、送信を止めました。内容を確かめて、もう一度送信してください。",
   },
   en: {
     loading: "Preparing encryption…",
@@ -52,6 +65,8 @@ const MESSAGES = {
     noCrypto: "This browser does not support the encryption this form requires",
     noDataTransfer: "This browser cannot send encrypted attachments",
     cleared: "Your previous input was encrypted and cannot be shown here. Please enter it again.",
+    required: (label: string) => `"${label}" is required. Please fill it in before sending.`,
+    changed: "Sending was stopped because the form changed while it was being encrypted. Please check it and send again.",
   },
 } as const;
 
@@ -155,37 +170,110 @@ function randomName() {
 }
 
 /**
- * 送信用に差し替える。文字列は暗号化した値を hidden で差し込み、元の項目を送信対象から外す。
- * 添付ファイルは暗号化したファイルに入れ替える（元のファイル名は暗号文の中に隠す）。
- * すべての暗号化に成功してから DOM を触るので、途中で失敗しても平文が混ざった状態にはならない。
- * 元に戻すための関数を返す。
+ * フォームの今の状態。暗号化している間に、項目の追加・削除・値・属性・添付ファイルが
+ * 変わっていないかを比べるために使う（変わっていたら、暗号化していない項目が混ざるおそれがある）。
  */
-async function swapInSealed(form: HTMLFormElement, keys: LoadedPublicKey[], submitter: HTMLElement | null) {
+// sealform 自身が書き換える属性は比べない
+const OWN_FORM_ATTRS = new Set(["data-sealform-state", "data-sealform-message", "data-sealform-attached"]);
+
+function snapshotOf(form: HTMLFormElement): { text: string; files: File[] } {
+  const parts: unknown[] = [];
+  const files: File[] = [];
+  for (const name of form.getAttributeNames().sort()) {
+    if (!OWN_FORM_ATTRS.has(name)) parts.push(["form", name, form.getAttribute(name)]);
+  }
+  for (const el of Array.from(form.elements)) {
+    // 送信ボタンの disabled は sealform が切り替える
+    const own = el.hasAttribute("data-sealform-submit");
+    const attrs = el.getAttributeNames().sort().filter((n) => !(own && n === "disabled")).map((n) => [n, el.getAttribute(n)]);
+    const row: unknown[] = [el.tagName, attrs];
+    if (el instanceof HTMLInputElement) {
+      row.push(el.type, el.name, own ? null : el.disabled, el.value, el.checked);
+      if (el.type === "file") for (const f of Array.from(el.files ?? [])) files.push(f);
+    } else if (el instanceof HTMLTextAreaElement) {
+      row.push(el.name, el.disabled, el.value);
+    } else if (el instanceof HTMLSelectElement) {
+      row.push(el.name, el.disabled, Array.from(el.options, (o) => [o.value, o.selected]));
+    } else if (el instanceof HTMLButtonElement) {
+      row.push(el.name, el.value);
+    }
+    parts.push(row);
+  }
+  return { text: JSON.stringify(parts), files };
+}
+
+function sameSnapshot(a: ReturnType<typeof snapshotOf>, b: ReturnType<typeof snapshotOf>): boolean {
+  return a.text === b.text && a.files.length === b.files.length && a.files.every((f, i) => f === b.files[i]);
+}
+
+function isRequired(el: Field): boolean {
+  return el.required || el.getAttribute("aria-required") === "true";
+}
+
+function labelOf(el: Field): string {
+  const t = el.labels?.[0]?.textContent?.replace(/\s+/g, " ").trim();
+  return (t || el.name).slice(0, 40);
+}
+
+/** 必須なのに空の項目（最初の1つ）。チェックボックス・ラジオは同じ name のどれかが選ばれていればよい。 */
+function missingRequired(form: HTMLFormElement, targets: Field[]): Field | undefined {
+  for (const el of targets) {
+    if (!isRequired(el)) continue;
+    if (isFileInput(el)) {
+      if ((el.files?.length ?? 0) === 0) return el;
+    } else if (el instanceof HTMLInputElement && (el.type === "checkbox" || el.type === "radio")) {
+      const group = Array.from(form.elements).filter((x): x is HTMLInputElement => x instanceof HTMLInputElement && x.name === el.name);
+      if (!group.some((x) => x.checked)) return el;
+    } else if (valuesOf(el).every((v) => v.trim() === "")) {
+      return el;
+    }
+  }
+  return undefined;
+}
+
+interface Prepared {
+  texts: Field[];
+  sealedTexts: [string, string][];
+  sealedFiles: [HTMLInputElement, File[]][];
+}
+
+/**
+ * 暗号化だけを行い、DOM には触らない。空欄は暗号化せず、そのままにする。
+ */
+async function prepareSealed(form: HTMLFormElement, keys: LoadedPublicKey[]): Promise<Prepared> {
   const formId = formIdOf(form);
   const maxMb = Number(form.dataset.sealformMaxMb);
   const maxBytes = Number.isFinite(maxMb) && maxMb > 0 ? maxMb * 1024 * 1024 : undefined;
   const targets = fieldsToSeal(form);
-  const texts = targets.filter((el) => !isFileInput(el));
-  const files = targets.filter(isFileInput);
-
+  const texts: Field[] = [];
   const sealedTexts: [string, string][] = [];
-  for (const el of texts) {
-    for (const v of valuesOf(el)) sealedTexts.push([el.name, await seal(keys, v, { form: formId, field: el.name })]);
+  for (const el of targets) {
+    if (isFileInput(el)) continue;
+    const values = valuesOf(el).filter((v) => v !== "");
+    if (values.length === 0) continue; // 空欄（未選択を含む）は暗号化しない
+    texts.push(el);
+    for (const v of values) sealedTexts.push([el.name, await seal(keys, v, { form: formId, field: el.name })]);
   }
   const sealedFiles: [HTMLInputElement, File[]][] = [];
-  for (const el of files) {
+  for (const el of targets.filter(isFileInput)) {
     const out: File[] = [];
     for (const f of Array.from(el.files ?? [])) {
       const bytes = await sealFile(keys, new Uint8Array(await f.arrayBuffer()), { name: f.name, type: f.type }, { form: formId, field: el.name }, { maxBytes });
       out.push(new File([bytes as BlobPart], randomName(), { type: "application/octet-stream" }));
     }
-    sealedFiles.push([el, out]);
+    if (out.length > 0) sealedFiles.push([el, out]);
   }
   if (sealedFiles.length > 0 && typeof DataTransfer === "undefined") {
     throw new SealformError("bad-token", MESSAGES[langOf(form)].noDataTransfer);
   }
+  return { texts, sealedTexts, sealedFiles };
+}
 
-  // ここまでで例外が出ていなければ、全項目の暗号化に成功している
+/**
+ * 暗号化した値に差し替える（同期処理）。文字列は暗号文を hidden で差し込んで元の項目を送信対象から外し、
+ * 添付ファイルは暗号化したファイルに入れ替える。元に戻すための関数を返す。
+ */
+function applySealed(form: HTMLFormElement, p: Prepared, submitter: HTMLElement | null) {
   const added: HTMLInputElement[] = [];
   const add = (name: string, value: string) => {
     const h = document.createElement("input");
@@ -196,13 +284,13 @@ async function swapInSealed(form: HTMLFormElement, keys: LoadedPublicKey[], subm
     form.appendChild(h);
     added.push(h);
   };
-  for (const el of texts) {
+  for (const el of p.texts) {
     el.dataset.sealformName = el.name;
     el.removeAttribute("name");
   }
-  for (const [n, v] of sealedTexts) add(n, v);
+  for (const [n, v] of p.sealedTexts) add(n, v);
   const originals: [HTMLInputElement, FileList | null][] = [];
-  for (const [el, out] of sealedFiles) {
+  for (const [el, out] of p.sealedFiles) {
     originals.push([el, el.files]);
     const dt = new DataTransfer();
     out.forEach((f) => dt.items.add(f));
@@ -214,13 +302,15 @@ async function swapInSealed(form: HTMLFormElement, keys: LoadedPublicKey[], subm
   }
   return () => {
     added.forEach((h) => h.remove());
-    for (const el of texts) {
+    for (const el of p.texts) {
       el.name = el.dataset.sealformName!;
       delete el.dataset.sealformName;
     }
     for (const [el, list] of originals) if (list) el.files = list;
   };
 }
+
+const keyExpired = (k: LoadedPublicKey) => !(Date.parse(k.doc.expires) > Date.now());
 
 export function attach(form: HTMLFormElement): void {
   if (form.dataset.sealformAttached) return;
@@ -237,6 +327,17 @@ export function attach(form: HTMLFormElement): void {
 
   // 設定に問題があっても submit の横取りはしておく（他のスクリプトに平文を渡さないため）
   const problem = configProblem(form);
+
+  // 鍵が無い・設定に問題があるなど、送れない状態の間は、他のスクリプトが送信ボタンを押せる状態に
+  // 戻しても（Contact Form 7 の同意チェックなど）押せないままにする。送信自体は submit の横取りでも止まる
+  if (typeof MutationObserver !== "undefined") {
+    new MutationObserver(() => {
+      if (keys && !problem) return;
+      form.querySelectorAll<HTMLButtonElement | HTMLInputElement>("[data-sealform-submit]").forEach((b) => {
+        if (!b.disabled) b.disabled = true;
+      });
+    }).observe(form, { subtree: true, attributes: true, attributeFilter: ["disabled"] });
+  }
 
   // サーバーが検査で差し戻したとき、受け取った暗号文を入力欄に戻してくることがある（Contact Form 7 など）。
   // そのまま送ると暗号文をさらに暗号化してしまうので、暗号文の入った欄は空にする
@@ -270,15 +371,46 @@ export function attach(form: HTMLFormElement): void {
     ev.preventDefault();
     ev.stopImmediatePropagation();
     if (!keys || form.dataset.sealformState === "sending") return;
+    const submitter = (ev as SubmitEvent).submitter;
+    const before = snapshotOf(form);
+
+    const missing = missingRequired(form, fieldsToSeal(form));
+    if (missing) {
+      setStatus(form, { state: "error", message: m.required(labelOf(missing)) });
+      missing.focus();
+      return;
+    }
+
     setSubmittable(form, false);
     setStatus(form, { state: "sending", message: m.sending });
+
+    // ページを長く開いていた間に鍵の期限が切れていたら、取り直す（取れなければ送らない）
+    if (keys.some(keyExpired)) {
+      keyCache.delete(`${keyUrl}\n${pins.join(" ")}`);
+      try {
+        keys = await fetchKeys(keyUrl, pins);
+      } catch (e) {
+        keys = undefined;
+        setStatus(form, { state: "error", message: m.prepFailed(reason(e, lang)) });
+        return;
+      }
+    }
+
+    let prepared: Prepared;
     try {
-      restore = await swapInSealed(form, keys, (ev as SubmitEvent).submitter);
+      prepared = await prepareSealed(form, keys);
     } catch (e) {
       setSubmittable(form, true);
       setStatus(form, { state: "error", message: m.sealFailed(reason(e, lang)) });
       return;
     }
+    // ここから送信までは同期処理だけ。比べた直後の状態のまま送られる
+    if (!sameSnapshot(before, snapshotOf(form))) {
+      setSubmittable(form, true);
+      setStatus(form, { state: "error", message: m.changed });
+      return;
+    }
+    restore = applySealed(form, prepared, submitter);
     // requestSubmit() だと submit イベントが再び発火するので、素の submit() を使う
     HTMLFormElement.prototype.submit.call(form);
   };

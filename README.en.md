@@ -17,13 +17,13 @@ Your server, database, logs and CDN only ever see ciphertext. Only the people ho
 </form>
 ```
 
-> Status: v0.3, experimental. It has **not** been reviewed by an independent cryptographer yet. It is not published to npm. Install it straight from GitHub (it builds itself on install):
+> Status: v0.4, experimental. It has **not** been reviewed by an independent cryptographer yet. It is not published to npm. Install it straight from GitHub (it builds itself on install):
 >
 > ```bash
-> npm install github:yotatameguchi-boop/sealform#v0.3.0
+> npm install github:yotatameguchi-boop/sealform#v0.4.0
 > ```
 >
-> Without installing, read `npx sealform` below as `npx github:yotatameguchi-boop/sealform#v0.3.0`. Prebuilt `sealform.js`, the offline decryption tool and the WordPress plugin zip are attached to each [release](https://github.com/yotatameguchi-boop/sealform/releases). Read "What it does not protect against" below before using it for sensitive data.
+> Without installing, read `npx sealform` below as `npx github:yotatameguchi-boop/sealform#v0.4.0`. Prebuilt `sealform.js`, the offline decryption tool and the WordPress plugin zip are attached to each [release](https://github.com/yotatameguchi-boop/sealform/releases). Read "What it does not protect against" below before using it for sensitive data.
 
 ## Why
 
@@ -42,7 +42,7 @@ With sealform the server **never touches the plaintext**. If the server is breac
 | **Multiple recipients** | Every counsellor reads with their own private key. Losing one key does not lock the others out. |
 | **Attachments** | File contents, original file names and MIME types are encrypted; sizes are padded to 4 KB. |
 | **Key rotation** | Add a new key, remove the old one. Keep the old private key to read past submissions. |
-| **Tamper detection** | The destination form and field name are bound to the ciphertext, so swapped or replayed ciphertext is rejected on decryption. |
+| **Tamper detection** | The destination form and field name are bound to the ciphertext, so ciphertext moved to another form or field is rejected on decryption. (Re-sending the same ciphertext to the same form and field is *not* prevented; see the threat model.) |
 | **External monitoring** | `sealform check` verifies from outside that the served JavaScript is byte-identical to an official release and that the public keys have not been swapped. |
 | **Offline decryption** | The decryption tool for staff is a single HTML file whose CSP blocks all network access. |
 | **Paper recovery codes** | Print a private key as a checksummed code and keep it in a safe. |
@@ -70,6 +70,14 @@ Use the HTML above. Rules:
 - Only fields with `data-seal` are encrypted. Without any `data-seal`, every non-hidden field (including files) is encrypted.
 - Encrypting files requires `enctype="multipart/form-data"`. The limit is 50 MB; lower it with `data-sealform-max-mb="10"`.
 - Pin all recipients' fingerprints with `data-sealform-fingerprint="SHA256:... SHA256:..."`. If an unknown key appears in the key set, the form refuses to send.
+- Mark every submit button with `data-sealform-submit` (an unmarked one could submit plaintext when JavaScript is off).
+
+When the form is submitted:
+
+- Empty `required` / `aria-required="true"` fields stop the submission before anything is encrypted.
+- **Empty fields are sent empty, not encrypted**, so server-side "required" checks keep working. The server can therefore tell which fields were empty.
+- If the form's fields, values or files change while encryption is running, nothing is sent.
+- Key expiry is re-checked at send time; expired keys are re-fetched, and if no valid key is available nothing is sent.
 - Pages with `<html lang="en">` (or `data-sealform-lang="en"`) show English messages.
 - With React and similar, add `data-sealform-manual` and call `sealform.attach(form)` after rendering ([Next.js example](examples/nextjs/app/sealed-form.tsx)).
 
@@ -77,7 +85,7 @@ Use the HTML above. Rules:
 
 ### 3. On the server
 
-Store what you receive. Use `isSealed()` / `isSealedFile()` to reject plaintext that should not be there. The same checks exist for PHP (`server/php/sealform.php`) and Python (`server/python/sealform_check.py`). Working examples are in [examples/](examples/README.md).
+Store what you receive. Use `isSealed()` / `isSealedFile()` to reject plaintext that should not be there. They only check the **shape** (header, kind, recipient list and body lengths); whether a ciphertext is genuine is only known when it is decrypted with a private key. Accept empty values for optional fields. The same checks exist for PHP (`server/php/sealform.php`) and Python (`server/python/sealform_check.py`). Working examples are in [examples/](examples/README.md).
 
 ```js
 import { isSealed, isSealedFile } from "sealform";
@@ -98,7 +106,11 @@ Paste CSVs or whole emails; tokens starting with `sf2.` (or `sf1.`) are picked u
 npx sealform check https://example.org/contact --fingerprint "SHA256:... SHA256:..."
 ```
 
+Add `--form-action /contact --sealed-field message` to also require that this form and field are protected. HTML is parsed the way browsers do, so markup hidden in comments or `<template>` is ignored.
+
 Exits with status 1 on problems. See the [GitHub Actions example](examples/github-actions/sealform-check.yml) for running it hourly.
+
+**Passing the check does not prove that the page actually encrypts.** It inspects the served HTML, public keys and sealform.js, not what other scripts on the page do or what a browser actually sends.
 
 ### Paper recovery and key rotation
 
@@ -129,7 +141,10 @@ A recovery code **is** the private key, without a passphrase. Store the paper so
 - **An attacker who controls your server and changes the JavaScript or page itself.** This is a limitation of all in-browser end-to-end encryption. sealform helps you *detect* it (SRI, CSP, fingerprint pinning, and `sealform check` run from elsewhere), but cannot prevent it.
 - Malware on the user's device or malicious browser extensions
 - Compromise of a recipient's device or private key
-- Metadata: that something was sent, when, its approximate size, and which key IDs it was addressed to
+- **Replay**: the same ciphertext can be submitted again to the same form and field. Deduplicate on the server (e.g. store a hash of each ciphertext) if that matters
+- **Other scripts on the same page** can read input before it is encrypted. Restrict them with CSP
+- Metadata: that something was sent, when, its approximate size, which key IDs it was addressed to, and which fields were empty
+- Validating the content (e.g. that an email address is well-formed): the server never sees it
 
 ## Development
 
@@ -140,6 +155,9 @@ npm test
 npm run example   # demo at http://localhost:8787
 ```
 
+- Real-browser tests: `npx playwright test --project=chromium --project=firefox --project=webkit` (WordPress + Contact Form 7 tests run in CI too)
+- Supported environments and maintenance policy: [docs/SUPPORT.md](docs/SUPPORT.md) (Japanese)
+- Contributing: [CONTRIBUTING.md](CONTRIBUTING.md) (Japanese)
 - Wire format: [docs/FORMAT.md](docs/FORMAT.md) (Japanese)
 - Test vectors: `test-vectors/` (X-Wing official vectors, sealform decryption vectors, server validator vectors)
 - Reporting vulnerabilities: [SECURITY.md](SECURITY.md)

@@ -19,7 +19,7 @@ import {
   type PublicKeyDoc,
 } from "./core.js";
 import { MIN_PASSPHRASE_LENGTH, protectPrivateKey, unlockPrivateKey } from "./keyfile.js";
-import { checkSite, worstLevel } from "./check.js";
+import { CHECK_SCOPE_NOTE, checkSite, worstLevel } from "./check.js";
 import { describePrivateKey, fromRecoveryCode, recoverySheetHtml, toRecoveryCode } from "./recovery.js";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -47,9 +47,12 @@ const HELP = `sealform ${__SEALFORM_VERSION__} — Web フォームをブラウ�
   sealform recovery import [--out <dir>]
       復旧コードから秘密鍵ファイルを作り直す（新しいパスフレーズを決める）
 
-  sealform check <url> [--fingerprint <SHA256:...>...] [--script-hash <sha384-...>] [--json]
+  sealform check <url> [--fingerprint <SHA256:...>...] [--form-action <path>...] [--sealed-field <name>...]
+                      [--script-hash <sha384-...>] [--json]
       公開中のページを外から点検する（JS・公開鍵の差し替え、送信ボタンの保護など）
+      --form-action と --sealed-field で、守られているべきフォームと項目を登録できる
       問題があれば終了コード 1。定期実行して改ざんを検知する用途を想定
+      ※ 点検に通っても、そのページで実際に暗号化されることまでは保証しない
 
   sealform sri
       同梱の sealform.js の integrity 値を表示する
@@ -326,6 +329,8 @@ async function cmdCheck(args: string[]) {
     allowPositionals: true,
     options: {
       fingerprint: { type: "string", multiple: true },
+      "form-action": { type: "string", multiple: true },
+      "sealed-field": { type: "string", multiple: true },
       "script-hash": { type: "string", multiple: true },
       json: { type: "boolean" },
     },
@@ -335,13 +340,16 @@ async function cmdCheck(args: string[]) {
   const findings = await checkSite(url, {
     fingerprints: (values.fingerprint ?? []).flatMap((f) => f.split(/[\s,]+/)).filter(Boolean),
     knownScriptHashes: [...(await bundledScriptHashes()), ...(values["script-hash"] ?? [])],
+    formActions: values["form-action"],
+    sealedFields: values["sealed-field"],
   });
   const worst = worstLevel(findings);
-  if (values.json) console.log(JSON.stringify({ url, result: worst, findings }, null, 2));
+  if (values.json) console.log(JSON.stringify({ url, result: worst, findings, note: CHECK_SCOPE_NOTE }, null, 2));
   else {
     const mark = { pass: "✓", warn: "!", fail: "✗" } as const;
     for (const f of findings) console.log(`${mark[f.level]} ${f.message}`);
     console.log(`\n結果: ${{ pass: "問題なし", warn: "警告あり", fail: "要対応" }[worst]}`);
+    console.log(`※ ${CHECK_SCOPE_NOTE}`);
   }
   if (worst === "fail") process.exitCode = 1;
 }

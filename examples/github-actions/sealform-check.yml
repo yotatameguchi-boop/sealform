@@ -10,11 +10,12 @@ jobs:
   check:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: 22
       - name: 点検
         run: |
-          npx --yes github:yotatameguchi-boop/sealform#v0.3.0 check "https://example.org/contact" \
+          npx --yes github:yotatameguchi-boop/sealform#v0.4.0 check "https://example.org/contact" \
+            --form-action /contact --sealed-field message \
             --fingerprint "SHA256:ここに keygen で表示された指紋"
       # 失敗するとジョブが赤くなり、GitHub から通知が届く

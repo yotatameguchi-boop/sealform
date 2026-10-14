@@ -206,4 +206,100 @@ describe("フォームへの組み込み", () => {
     expect(form.querySelector<HTMLInputElement>("input[name=csrf]")!.value).toBe("tok123");
     expect(form.querySelector("[data-sealform-status]")!.textContent).toContain("入力し直して");
   });
+
+  it("暗号化中に入力欄が足されたら送らない（レビューで再現された平文送信）", async () => {
+    const form = mount(FORM());
+    await until(() => form.dataset.sealformState === "ready");
+    form.addEventListener("sealform:status", (e) => {
+      if ((e as CustomEvent).detail.state !== "sending") return;
+      const extra = document.createElement("input");
+      extra.name = "injected";
+      extra.value = "こっそり足された平文";
+      extra.setAttribute("data-seal", "");
+      form.appendChild(extra);
+    });
+    form.requestSubmit();
+    await until(() => form.dataset.sealformState === "error");
+    expect(submitted).toHaveLength(0);
+    expect(form.dataset.sealformMessage).toContain("フォームの内容が変わった");
+    expect(form.querySelector("button")!.disabled).toBe(false);
+  });
+
+  it("暗号化中に値が書き換えられたら送らない", async () => {
+    const form = mount(FORM());
+    await until(() => form.dataset.sealformState === "ready");
+    form.addEventListener("sealform:status", (e) => {
+      if ((e as CustomEvent).detail.state === "sending") form.querySelector<HTMLInputElement>("input[name=name]")!.value = "別の値";
+    });
+    form.requestSubmit();
+    await until(() => form.dataset.sealformState === "error");
+    expect(submitted).toHaveLength(0);
+  });
+
+  it("開いている間に鍵の期限が切れたら、取り直して、それも切れていれば送らない", async () => {
+    const short = await generateKeyPair({ validDays: 1 });
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify(short.publicDoc))));
+    const form = mount(FORM());
+    await until(() => form.dataset.sealformState === "ready");
+    vi.useFakeTimers({ toFake: ["Date"] });
+    try {
+      vi.setSystemTime(Date.now() + 2 * 86400_000);
+      form.requestSubmit();
+      await until(() => form.dataset.sealformState === "error");
+      expect(submitted).toHaveLength(0);
+      expect(form.dataset.sealformMessage).toContain("有効期限");
+      expect(form.querySelector("button")!.disabled).toBe(true);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("開いている間に鍵の期限が切れても、新しい鍵が取れればそれで送る", async () => {
+    const short = await generateKeyPair({ validDays: 1 });
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify(short.publicDoc)));
+    vi.stubGlobal("fetch", fetchMock);
+    const form = mount(FORM());
+    await until(() => form.dataset.sealformState === "ready");
+    vi.useFakeTimers({ toFake: ["Date"] });
+    try {
+      vi.setSystemTime(Date.now() + 2 * 86400_000);
+      const fresh = await generateKeyPair();
+      fetchMock.mockImplementation(async () => new Response(JSON.stringify(fresh.publicDoc)));
+      form.requestSubmit();
+      await until(() => submitted.length === 1);
+      const t = submitted[0]!.get("body") as string;
+      expect((await open({ kid: fresh.publicDoc.kid, privateKey: fresh.privateKey }, t)).plaintext).toBe("いじめの相談です");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("必須の欄が空なら、暗号化する前に止めて知らせる（novalidate のフォームでも）", async () => {
+    // Contact Form 7 などは novalidate を付けてブラウザの必須チェックを止めているので、sealform が確かめる
+    const form = mount(FORM('method="post" novalidate').replace("<textarea name=\"body\" data-seal>いじめの相談です</textarea>", "<label for=\"b\">相談内容</label><textarea id=\"b\" name=\"body\" data-seal required></textarea>"));
+    await until(() => form.dataset.sealformState === "ready");
+    form.requestSubmit();
+    await until(() => form.dataset.sealformState === "error");
+    expect(submitted).toHaveLength(0);
+    expect(form.dataset.sealformMessage).toContain("「相談内容」は必須");
+  });
+
+  it("任意の欄が空なら、暗号化せず空のまま送る（サーバー側の必須チェックが効くように）", async () => {
+    const form = mount(FORM().replace('value="山田"', 'value="" data-seal'));
+    await until(() => form.dataset.sealformState === "ready");
+    form.requestSubmit();
+    await until(() => submitted.length === 1);
+    expect(submitted[0]!.get("name")).toBe("");
+    expect(isSealed(submitted[0]!.get("body"))).toBe(true);
+  });
+
+  it("準備ができていない間は、他のスクリプトが送信ボタンを戻しても押せないままにする", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => new Response("not found", { status: 404 })));
+    const form = mount(FORM());
+    await until(() => form.dataset.sealformState === "error");
+    const btn = form.querySelector("button")!;
+    btn.disabled = false; // Contact Form 7 が同意チェックで戻すのと同じ
+    await until(() => btn.disabled);
+    expect(btn.disabled).toBe(true);
+  });
 });

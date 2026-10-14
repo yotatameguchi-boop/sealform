@@ -97,4 +97,67 @@ describe("sealform check", () => {
     expect(levels(fs, "key-missing")).toEqual(["warn"]);
     expect(fs.find((f) => f.id === "key-expiry")!.message).toContain("相談員A");
   });
+
+  it("コメントの中に正しい HTML を残し、実際は平文フォームだけのページを見破る（レビューの指摘）", async () => {
+    const kp = await generateKeyPair();
+    const html = `<!--
+<script src="/sealform.js" integrity="${JS_HASH}"></script>
+<form method="post" action="/contact" data-sealform-key="/.well-known/sealform-key.json">
+  <textarea name="body" data-seal></textarea><button disabled data-sealform-submit>送信</button>
+</form>
+-->
+<form method="post" action="/contact"><textarea name="body"></textarea><button>送信</button></form>`;
+    const fs = await checkSite("https://example.org/", {
+      fetch: site(kp, { html }), fingerprints: [kp.publicDoc.fingerprint], knownScriptHashes: [JS_HASH], formActions: ["/contact"],
+    });
+    expect(levels(fs, "form")).toEqual(["fail"]);
+    expect(levels(fs, "watched-form")).toEqual(["fail"]);
+    expect(levels(fs, "other-forms")).toEqual(["warn"]);
+  });
+
+  it("<template> や <noscript> の中の HTML も対象にしない", async () => {
+    const kp = await generateKeyPair();
+    const good = `<script src="/sealform.js" integrity="${JS_HASH}"></script><form method="post" action="/contact" data-sealform-key="/.well-known/sealform-key.json"><textarea name="body" data-seal></textarea><button disabled data-sealform-submit>送信</button></form>`;
+    for (const wrap of [(h: string) => `<template>${h}</template>`, (h: string) => `<noscript>${h}</noscript>`]) {
+      const fs = await checkSite("https://example.org/", { fetch: site(kp, { html: wrap(good) }), fingerprints: [kp.publicDoc.fingerprint], knownScriptHashes: [JS_HASH] });
+      expect(levels(fs, "form")).toEqual(["fail"]);
+    }
+  });
+
+  it("script-src * などの広すぎる CSP は制限とみなさない", async () => {
+    const kp = await generateKeyPair();
+    for (const csp of ["script-src *", "default-src 'self'; script-src https:", "script-src 'self' 'unsafe-inline'", "script-src 'self' *.example.com"]) {
+      const fs = await checkSite("https://example.org/", { fetch: site(kp, { csp }), fingerprints: [kp.publicDoc.fingerprint], knownScriptHashes: [JS_HASH] });
+      expect(levels(fs, "csp"), csp).toEqual(["warn"]);
+    }
+    const ok = await checkSite("https://example.org/", { fetch: site(kp, { csp: "script-src 'self'" }), fingerprints: [kp.publicDoc.fingerprint], knownScriptHashes: [JS_HASH] });
+    expect(levels(ok, "csp")).toEqual(["pass"]);
+  });
+
+  it("<meta> で指定した CSP も読む", async () => {
+    const kp = await generateKeyPair();
+    const html = `<meta http-equiv="Content-Security-Policy" content="script-src 'self'"><script src="/sealform.js" integrity="${JS_HASH}"></script>
+<form method="post" action="/contact" data-sealform-key="/.well-known/sealform-key.json"><textarea name="body" data-seal></textarea><button disabled data-sealform-submit>送信</button></form>`;
+    const fs = await checkSite("https://example.org/", { fetch: site(kp, { html, csp: null }), fingerprints: [kp.publicDoc.fingerprint], knownScriptHashes: [JS_HASH] });
+    expect(levels(fs, "csp")).toEqual(["pass"]);
+  });
+
+  it("保護の付いていない送信ボタンが別にあれば失敗にする（JS 無しで平文が送れるため）", async () => {
+    const kp = await generateKeyPair();
+    const html = `<script src="/sealform.js" integrity="${JS_HASH}"></script>
+<form method="post" action="/contact" data-sealform-key="/.well-known/sealform-key.json"><textarea name="body" data-seal></textarea>
+<button disabled data-sealform-submit>送信</button><input type="submit" value="こちらでも送信"></form>`;
+    const fs = await checkSite("https://example.org/", { fetch: site(kp, { html }), fingerprints: [kp.publicDoc.fingerprint], knownScriptHashes: [JS_HASH] });
+    expect(levels(fs, "submit-guard")).toEqual(["fail"]);
+  });
+
+  it("登録した項目の data-seal が外されていたら検出する", async () => {
+    const kp = await generateKeyPair();
+    const html = `<script src="/sealform.js" integrity="${JS_HASH}"></script>
+<form method="post" action="/contact" data-sealform-key="/.well-known/sealform-key.json"><input name="name" data-seal><textarea name="body"></textarea><button disabled data-sealform-submit>送信</button></form>`;
+    const fs = await checkSite("https://example.org/", {
+      fetch: site(kp, { html }), fingerprints: [kp.publicDoc.fingerprint], knownScriptHashes: [JS_HASH], sealedFields: ["name", "body"],
+    });
+    expect(fs.filter((f) => f.id === "watched-field").map((f) => [f.level, f.message.includes("body")])).toEqual([["pass", false], ["fail", true]]);
+  });
 });

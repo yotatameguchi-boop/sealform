@@ -24,7 +24,8 @@ app.get("/.well-known/sealform-key.json", (req, res) => res.sendFile(keySetPath,
 app.post("/contact", upload.array("attachment"), async (req, res) => {
   const { name, message } = req.body;
   // 平文が混ざっていたら保存しない（設定ミスや JS の差し替えへの保険）
-  if (!isSealed(name) || !isSealed(message)) return res.status(400).send("暗号化されていない値が届きました");
+  // 空欄は暗号化されずに空のまま届く。任意のお名前は空でもよいが、相談内容は必須
+  if ((name !== "" && !isSealed(name)) || !isSealed(message)) return res.status(400).send("暗号化されていない値が届きました");
   const files = (req.files ?? []).filter((f) => f.size > 0);
   if (files.some((f) => !isSealedFile(new Uint8Array(f.buffer)))) return res.status(400).send("暗号化されていないファイルが届きました");
   const saved = [];

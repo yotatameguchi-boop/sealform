@@ -47,7 +47,8 @@ createServer(async (req, res) => {
       const name = form.get("name") ?? "";
       const message = form.get("message") ?? "";
       // 平文が混ざって届いたら保存しない（設定ミスや JS の差し替えへの保険）
-      if (!isSealed(name) || !isSealed(message)) {
+      // 空欄は暗号化されずに空のまま届く。任意のお名前は空でもよいが、相談内容は必須
+      if ((name !== "" && !isSealed(name)) || !isSealed(message)) {
         return send(res, 400, "text/plain; charset=utf-8", "暗号化されていない値が届いたため、受け付けませんでした");
       }
       const saved = [];

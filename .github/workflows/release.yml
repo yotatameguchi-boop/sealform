@@ -1,5 +1,6 @@
-# v* のタグを push すると、GitHub Release に配布物とハッシュを載せる。
+# v* のタグを push すると、GitHub Release に配布物・ハッシュ・チェックサム一覧を載せる。
 # リポジトリの Secrets に NPM_TOKEN があるときだけ、npm にも provenance 付きで公開する（今は npm 未公開の方針）。
+# Actions はコミット SHA で固定する（タグの付け替えによる差し替えを防ぐ）。
 name: Release
 on:
   push:
@@ -13,8 +14,8 @@ jobs:
     env:
       NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: 22
           registry-url: https://registry.npmjs.org
@@ -27,6 +28,12 @@ jobs:
       - name: 配布物が、コミットされた hashes.json の記録と一致するか
         run: git diff --exit-code hashes.json
       - run: npm run build:wordpress
+      - name: チェックサム一覧
+        run: |
+          mkdir -p release
+          cp dist/sealform.js dist/sealform-opener.html dist/wordpress/sealform.zip hashes.json release/
+          (cd release && sha256sum sealform.js sealform-opener.html sealform.zip hashes.json > SHA256SUMS)
+          cat release/SHA256SUMS
       - name: npm に公開（NPM_TOKEN があるときだけ）
         if: env.NPM_TOKEN != ''
         run: npm publish --provenance --access public
@@ -42,8 +49,15 @@ jobs:
             echo
             echo "インストール: \`npm install github:${GITHUB_REPOSITORY}#${GITHUB_REF_NAME}\`（インストール時に自動でビルドされます）"
             echo
+            echo "配布物のチェックサムは SHA256SUMS にあります（\`sha256sum -c SHA256SUMS\` で確かめられます）。"
+            echo
+            echo "### 既知の制限"
+            echo "- 試作段階です。暗号の専門家による第三者レビューはまだ受けていません"
+            echo "- サーバーを乗っ取られて、配信する JS やページを書き換えられること自体は防げません（sealform check は気づくための道具です）"
+            echo "- 空欄は暗号化せずに送るため、どの欄が空だったかはサーバーに分かります"
+            echo "- サーバーは中身を見られないので、メールアドレスの形式のような中身の検査はできません"
+            echo "- 同じフォーム・同じ項目への同じ暗号文の再送（リプレイ）は防ぎません"
+            echo
             echo "変更点は [CHANGELOG.md](https://github.com/${GITHUB_REPOSITORY}/blob/${GITHUB_REF_NAME}/CHANGELOG.md) を参照。"
           } > notes.md
-          gh release create "$GITHUB_REF_NAME" \
-            dist/sealform.js dist/sealform-opener.html dist/wordpress/sealform.zip hashes.json \
-            --title "$GITHUB_REF_NAME" --notes-file notes.md
+          gh release create "$GITHUB_REF_NAME" release/* --title "$GITHUB_REF_NAME" --notes-file notes.md

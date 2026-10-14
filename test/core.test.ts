@@ -166,6 +166,16 @@ describe("鍵の束と鍵の更新", () => {
     expect((await open(entry(cur), t)).plaintext).toBe("移行中");
   });
 
+  it("読み込んだあとに期限が切れた鍵には暗号化しない（復号はできる）", async () => {
+    const kp = await generateKeyPair({ validDays: 1 });
+    const key = await loadPublicKey(kp.publicDoc);
+    const later = new Date(Date.now() + 2 * 86400_000);
+    expect(await code(seal(key, "x", ctx, { now: later }))).toBe("key-expired");
+    expect(await code(sealFile(key, new Uint8Array(1), { name: "a", type: "" }, ctx, { now: later }))).toBe("key-expired");
+    const t = await seal(key, "期限内に暗号化", ctx);
+    expect((await open(entry(kp), t)).plaintext).toBe("期限内に暗号化");
+  });
+
   it("有効な鍵が1つも無ければエラー", async () => {
     const old = await generateKeyPair({ validDays: 1, now: new Date("2020-01-01") });
     expect(await code(loadKeys(set(old)))).toBe("key-expired");
