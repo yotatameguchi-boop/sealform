@@ -6,3 +6,5 @@ examples/.data/
 .venv/
 __pycache__/
 sealform-recovery-*.html
+test-results/
+playwright-report/
